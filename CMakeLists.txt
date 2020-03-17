@@ -251,6 +251,15 @@ if(ENABLE_ASAN OR ENABLE_TSAN)
   set(ENABLE_STANDALONE_CALCITE ON)
 endif()
 
+# Embedded database
+option(ENABLE_DBE "Enable embedded database" OFF)
+if(ENABLE_DBE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+  set(ENABLE_STANDALONE_CALCITE ON)
+  add_definitions("-D__EMBEDDED_DATABASE__")
+endif()
+
 # Code coverage
 option(ENABLE_CODE_COVERAGE "Enable compile time code coverage" OFF)
 if(ENABLE_CODE_COVERAGE)
@@ -494,6 +503,10 @@ add_subdirectory(SQLFrontend)
 add_subdirectory(ThriftHandler)
 
 add_subdirectory(Distributed)
+
+if(ENABLE_DBE)
+  add_subdirectory(Wrapper)
+endif()
 
 option(ENABLE_ODBC "Build ODBC driver" OFF)
 if(ENABLE_ODBC)
