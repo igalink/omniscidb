@@ -42,31 +42,31 @@ cdef class PyRow:
     cdef _Row c_row  #Hold a C++ instance which we're wrapping
 
     def getInt(self, col):
-        return self.c_row.GetInt(col);
+        return self.c_row.getInt(col);
 
     def getDouble(self, col):
-        return self.c_row.GetDouble(col);
+        return self.c_row.getDouble(col);
 
     def getStr(self, col):
-        return self.c_row.GetStr(col);
+        return self.c_row.getStr(col);
 
 
 cdef class PyCursor:
     def colCount(self):
-        return self.c_cursor.GetColCount()
+        return self.c_cursor.getColCount()
 
     def rowCount(self):
-        return self.c_cursor.GetRowCount()
+        return self.c_cursor.getRowCount()
 
     def nextRow(self):
         obj = PyRow()
-        obj.c_row = self.c_cursor.GetNextRow()
+        obj.c_row = self.c_cursor.getNextRow()
         return obj
 
     def getColType(self, uint32_t pos):
 #        obj = PyColumnType()
 #        obj.c_col_type = self.c_cursor.GetColType(pos)
-        return self.c_cursor.GetColType(pos)
+        return self.c_cursor.getColType(pos)
 
     def showRows(self, int max_rows):
         col_count = self.colCount();
@@ -124,16 +124,16 @@ cdef class PyDbEngine:
     cdef DBEngine* c_dbe  #Hold a C++ instance which we're wrapping
 
     def __cinit__(self, path):
-        self.c_dbe = DBEngine.Create(path)
+        self.c_dbe = DBEngine.create(path)
 
     def __dealloc__(self):
-        self.c_dbe.Reset()
+        self.c_dbe.reset()
         del self.c_dbe
 
     def executeDDL(self, query):
         try:
             t1=datetime.utcnow()
-            self.c_dbe.ExecuteDDL(query)
+            self.c_dbe.executeDDL(query)
             t2=datetime.utcnow()
             d = t2-t1
             print(d)
@@ -143,7 +143,7 @@ cdef class PyDbEngine:
     def executeDML(self, query):
         """        try:"""
         obj = PyCursor();
-        obj.c_cursor = self.c_dbe.ExecuteDML(query);
+        obj.c_cursor = self.c_dbe.executeDML(query);
         return obj;
 #        obj = PyResultSet()
 #        obj.c_ptr = self.c_dbe.ExecuteDML(query).get();

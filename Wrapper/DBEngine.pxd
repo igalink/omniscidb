@@ -45,23 +45,23 @@ cdef extern from "QueryEngine/ResultSet.h":
 
 cdef extern from "DBEngine.h" namespace "OmnisciDbEngine":
     cdef cppclass Row:
-        int64_t GetInt(size_t col);
-        double GetDouble(size_t col);
-        string GetStr(size_t col);
+        int64_t getInt(size_t col);
+        double getDouble(size_t col);
+        string getStr(size_t col);
 
     cdef cppclass Cursor:
-        size_t GetColCount()
-        size_t GetRowCount()
-        Row GetNextRow()
-        int GetColType(uint32_t nPos)
+        size_t getColCount()
+        size_t getRowCount()
+        Row getNextRow()
+        int getColType(uint32_t nPos)
 #        shared_ptr[CRecordBatch] GetArrowRecordBatch()
 
     cdef cppclass DBEngine:
-        void ExecuteDDL(string)
-        Cursor* ExecuteDML(string)
-#        shared_ptr[ResultSet] ExecuteDML(string)
-        void Reset()
+        void executeDDL(string)
+        Cursor* executeDML(string)
+#        shared_ptr[ResultSet] executeDML(string)
+        void reset()
         @staticmethod
-        DBEngine* Create(string)
+        DBEngine* create(string)
 
 
