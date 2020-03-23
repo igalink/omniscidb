@@ -43,7 +43,7 @@ cdef extern from "QueryEngine/ResultSet.h":
         vector[TargetValue] getNextRow(const bool translate_strings, const bool decimal_to_double)
         TargetValue getRowAt(const size_t row_idx, const size_t col_idx, const bool translate_strings, const bool decimal_to_double)
 
-cdef extern from "DBEngine.h" namespace "OmnisciDbEngine":
+cdef extern from "DBEngine.h" namespace "EmbeddedDatabase":
     cdef cppclass Row:
         int64_t getInt(size_t col);
         double getDouble(size_t col);

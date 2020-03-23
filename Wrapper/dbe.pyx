@@ -14,29 +14,17 @@ from DBEngine cimport *
 from DBEngine cimport Row as _Row
 from DBEngine cimport Cursor as _Cursor
 from DBEngine cimport DBEngine
-from DBEngine cimport ResultSet
+#from DBEngine cimport ResultSet
 
-cdef class PyResultSet:
-    cdef shared_ptr[ResultSet] c_result_set  #Hold a C++ instance which we're wrapping
-    cdef ResultSet* c_ptr
+#cdef class PyResultSet:
+#    cdef shared_ptr[ResultSet] c_result_set  #Hold a C++ instance which we're wrapping
+#    cdef ResultSet* c_ptr
 
-    def __cinit__(self):
-        self.c_result_set.reset()
+#    def __cinit__(self):
+#        self.c_result_set.reset()
 
 #    def sizze(PyResultSet self):
 #        return deref(self.c_ptr).colCount()
-
-cdef object PyStruct(shared_ptr[ResultSet] PyResultSet_ptr):
-    """Python object factory class taking Cpp ResultSet pointer
-    as argument
-    """
-    # Create new PyResultSet object. This does not create
-    # new structure but does allocate a null pointer
-    cdef PyResultSet py_wrapper = PyResultSet()
-    # Set pointer of cdef class to existing struct ptr
-    py_wrapper.c_result_set = PyResultSet_ptr
-    # Return the wrapped PyResultSet object with PyResultSet_ptr
-    return py_wrapper
 
 cdef class PyRow:
     cdef _Row c_row  #Hold a C++ instance which we're wrapping
@@ -52,6 +40,8 @@ cdef class PyRow:
 
 
 cdef class PyCursor:
+    cdef _Cursor* c_cursor  #Hold a C++ instance which we're wrapping
+
     def colCount(self):
         return self.c_cursor.getColCount()
 
