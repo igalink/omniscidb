@@ -20,7 +20,6 @@
 #include <iostream>
 #include "Catalog/Catalog.h"
 #include "QueryEngine/CompilationOptions.h"
-#include "QueryEngine/ResultSet.h"
 #include "QueryRunner/QueryRunner.h"
 #include "Shared/Logger.h"
 #include "Shared/mapdpath.h"
@@ -80,6 +79,8 @@ class CursorImpl : public Cursor {
     return ColumnType::Unknown;
   }
 
+  ResultSet* getResultSet() { return m_result_set.get(); }
+
  private:
   std::shared_ptr<ResultSet> m_result_set;
   std::weak_ptr<Data_Namespace::DataMgr> m_data_mgr;
@@ -91,7 +92,7 @@ class CursorImpl : public Cursor {
 class DBEngineImpl : public DBEngine {
  public:
   // TODO: Remove all that hardcoded settings
-  const int CALCITEPORT = 3279;
+  const int CALCITE_PORT = 3279;
   const std::string OMNISCI_DEFAULT_DB = "omnisci";
   const std::string OMNISCI_ROOT_USER = "admin";
   const std::string OMNISCI_DATA_PATH = "//mapd_data";
@@ -128,7 +129,7 @@ class DBEngineImpl : public DBEngine {
       std::string data_path = m_base_path + OMNISCI_DATA_PATH;
       m_data_mgr =
           std::make_shared<Data_Namespace::DataMgr>(data_path, mapd_parms, false, 0);
-      auto calcite = std::make_shared<Calcite>(-1, CALCITEPORT, m_base_path, 1024, 5000);
+      auto calcite = std::make_shared<Calcite>(-1, CALCITE_PORT, m_base_path, 1024, 5000);
       auto& sys_cat = Catalog_Namespace::SysCatalog::instance();
       sys_cat.init(m_base_path, m_data_mgr, {}, calcite, false, false, {});
       if (!sys_cat.getSqliteConnector()) {
@@ -261,4 +262,9 @@ int Cursor::getColType(uint32_t col_num) {
   CursorImpl* cursor = getImpl(this);
   return (int)cursor->getColType(col_num);
 }
+ResultSet* Cursor::getResultSet() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getResultSet();
+}
+
 }  // namespace EmbeddedDatabase

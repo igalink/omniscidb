@@ -21,6 +21,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include "QueryEngine/ResultSet.h"
 #include "QueryEngine/TargetValue.h"
 
 namespace EmbeddedDatabase {
@@ -43,6 +44,7 @@ class Cursor {
   size_t getRowCount();
   Row getNextRow();
   int getColType(uint32_t col_num);
+  ResultSet* getResultSet();
 };
 
 class DBEngine {
@@ -55,4 +57,5 @@ class DBEngine {
  protected:
   DBEngine() {}
 };
+
 }  // namespace EmbeddedDatabase
