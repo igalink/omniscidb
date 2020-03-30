@@ -14,28 +14,7 @@ from DBEngine cimport *
 from DBEngine cimport Row as _Row
 from DBEngine cimport Cursor as _Cursor
 from DBEngine cimport DBEngine
-#from DBEngine cimport ResultSet
-
-#try:
-#    from pyarrow import RecordBatchStreamReader  # NOQA
-#    from pyarrow import RecordBatchStreamWriter  # NOQA
-#    from pyarrow import RecordBatch  # NOQA
-#except ImportError:
-#    pass
-
 from pyarrow.lib cimport *
-
-#pa.import_pyarrow()
-
-#cdef class PyResultSet:
-#    cdef shared_ptr[ResultSet] c_result_set  #Hold a C++ instance which we're wrapping
-#    cdef ResultSet* c_ptr
-
-#    def __cinit__(self):
-#        self.c_result_set.reset()
-
-#    def sizze(PyResultSet self):
-#        return deref(self.c_ptr).colCount()
 
 cdef class PyRow:
     cdef _Row c_row  #Hold a C++ instance which we're wrapping
@@ -155,15 +134,11 @@ cdef class PyDbEngine:
             os.abort()
 
     def executeDML(self, query):
-        """        try:"""
         obj = PyCursor();
         obj.c_cursor = self.c_dbe.executeDML(query);
         return obj;
-#        obj = PyResultSet()
-#        obj.c_ptr = self.c_dbe.ExecuteDML(query).get();
-#        return obj;
-#        cdef PyResultSet mypystruct = PyStruct(self.c_dbe.ExecuteDML(query))
-#        return mypystruct
-        """        except Exception, e:
-        os.abort()
-        """
+
+    def select_df(self, query):
+        obj = PyCursor();
+        obj.c_cursor = self.c_dbe.executeDML(query);
+        return obj.getArrowRecordBatch().to_pandas()
