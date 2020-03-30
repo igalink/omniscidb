@@ -21,6 +21,8 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <arrow/api.h>
+#include <arrow/ipc/api.h>
 #include "QueryEngine/TargetValue.h"
 
 namespace EmbeddedDatabase {
@@ -43,6 +45,7 @@ class Cursor {
   size_t getRowCount();
   Row getNextRow();
   int getColType(uint32_t col_num);
+  std::shared_ptr<arrow::RecordBatch> getArrowRecordBatch();
 };
 
 class DBEngine {

@@ -1,12 +1,17 @@
 from __future__ import absolute_import
 
-from libc.stdint cimport int64_t, uint64_t, uint32_t
+from libc.stdint cimport int64_t, uint64_t, uint32_t, uint8_t
 from libcpp.memory cimport shared_ptr
 from libcpp.string cimport string
 from libcpp cimport bool, nullptr_t, nullptr
 from libcpp.pair cimport pair
 from libcpp.vector cimport vector
 from cython.operator cimport dereference as deref
+
+cdef extern from "arrow/api.h" namespace "arrow" nogil:
+    cdef cppclass CRecordBatch" arrow::RecordBatch":
+        int num_columns()
+        int64_t num_rows()
 
 cdef extern from "boost/variant.hpp" namespace "boost":
     cdef cppclass boostvariant "boost::variant" [T1]:
@@ -45,16 +50,16 @@ cdef extern from "QueryEngine/ResultSet.h":
 
 cdef extern from "DBEngine.h" namespace "EmbeddedDatabase":
     cdef cppclass Row:
-        int64_t getInt(size_t col);
-        double getDouble(size_t col);
-        string getStr(size_t col);
+        int64_t getInt(size_t col)
+        double getDouble(size_t col)
+        string getStr(size_t col)
 
     cdef cppclass Cursor:
         size_t getColCount()
         size_t getRowCount()
         Row getNextRow()
         int getColType(uint32_t nPos)
-#        shared_ptr[CRecordBatch] GetArrowRecordBatch()
+        shared_ptr[CRecordBatch] getArrowRecordBatch()
 
     cdef cppclass DBEngine:
         void executeDDL(string)

@@ -180,7 +180,6 @@ class ArrowResultSetConverter {
 
   ArrowResult getArrowResult() const { return getArrowResultImpl(); }
 
- private:
   ArrowResultSetConverter(const std::shared_ptr<ResultSet>& results,
                           const std::vector<std::string>& col_names,
                           const int32_t first_n)
@@ -189,6 +188,8 @@ class ArrowResultSetConverter {
       arrow::ipc::DictionaryMemo& memo) const;
   std::shared_ptr<arrow::RecordBatch> getArrowBatch(
       const std::shared_ptr<arrow::Schema>& schema) const;
+
+ private:
   ArrowResult getArrowResultImpl() const;
   std::shared_ptr<arrow::Field> makeField(
       const std::string name,

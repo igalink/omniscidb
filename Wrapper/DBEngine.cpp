@@ -21,6 +21,7 @@
 #include "Catalog/Catalog.h"
 #include "QueryEngine/CompilationOptions.h"
 #include "QueryEngine/ResultSet.h"
+#include "QueryEngine/ArrowResultSet.h"
 #include "QueryRunner/QueryRunner.h"
 #include "Shared/Logger.h"
 #include "Shared/mapdpath.h"
@@ -78,6 +79,36 @@ class CursorImpl : public Cursor {
       }
     }
     return ColumnType::Unknown;
+  }
+
+  std::shared_ptr<arrow::RecordBatch> getArrowRecordBatch() {
+    auto col_count = getColCount();
+    if (col_count > 0) {
+        // TODO: Get col_names using ExecutionResult::getTargetsMeta
+        unsigned int col_index = 0;
+        std::vector<std::string> col_names(col_count);
+        std::generate_n(
+            col_names.begin(),
+            col_count,
+            [&col_index] ()-> std::string {
+                return std::string("field_") + std::to_string(++col_index);
+        });
+        auto row_count = getRowCount();;
+        if (row_count > 0) {
+            if (auto data_mgr = m_data_mgr.lock()) {
+                const auto & converter = std::make_unique<ArrowResultSetConverter>(
+                    m_result_set,
+                    data_mgr,
+                    ExecutorDeviceType::CPU,
+                    0,
+                    col_names,
+                    row_count);
+                arrow::ipc::DictionaryMemo memo;
+                return converter->convertToArrow(memo);
+            }
+        }
+    }
+    return nullptr;
   }
 
  private:
@@ -260,5 +291,10 @@ Row Cursor::getNextRow() {
 int Cursor::getColType(uint32_t col_num) {
   CursorImpl* cursor = getImpl(this);
   return (int)cursor->getColType(col_num);
+}
+
+std::shared_ptr<arrow::RecordBatch> Cursor::getArrowRecordBatch() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getArrowRecordBatch();
 }
 }  // namespace EmbeddedDatabase

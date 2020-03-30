@@ -16,6 +16,17 @@ from DBEngine cimport Cursor as _Cursor
 from DBEngine cimport DBEngine
 #from DBEngine cimport ResultSet
 
+#try:
+#    from pyarrow import RecordBatchStreamReader  # NOQA
+#    from pyarrow import RecordBatchStreamWriter  # NOQA
+#    from pyarrow import RecordBatch  # NOQA
+#except ImportError:
+#    pass
+
+from pyarrow.lib cimport *
+
+#pa.import_pyarrow()
+
 #cdef class PyResultSet:
 #    cdef shared_ptr[ResultSet] c_result_set  #Hold a C++ instance which we're wrapping
 #    cdef ResultSet* c_ptr
@@ -41,6 +52,7 @@ cdef class PyRow:
 
 cdef class PyCursor:
     cdef _Cursor* c_cursor  #Hold a C++ instance which we're wrapping
+    cdef shared_ptr[CRecordBatch] c_batch
 
     def colCount(self):
         return self.c_cursor.getColCount()
@@ -109,6 +121,18 @@ cdef class PyCursor:
                     fields.append('UNKNOWN');
 #            print(format_row.format("", *fields))
             print(*fields)
+
+    def getArrowRecordBatch(self):
+        print('getArrowRecordBatch - BEGIN')
+        self.c_batch = self.c_cursor.getArrowRecordBatch()
+        print('getArrowRecordBatch - END')
+        if self.c_batch.get() is NULL:
+            print('Record batch is NULL')
+#            return 55555
+#        return self.c_batch.get().num_rows()
+#        return pyarrow_wrap_batch(self.c_batch.get())
+#        dir(pa)
+        return pyarrow_wrap_batch(self.c_batch)
 
 cdef class PyDbEngine:
     cdef DBEngine* c_dbe  #Hold a C++ instance which we're wrapping
