@@ -21,17 +21,18 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include "QueryEngine/TargetValue.h"
+#include "QueryEngine/ResultSet.h"
 
 namespace EmbeddedDatabase {
 
 class Row {
  public:
   Row();
-  Row(std::vector<TargetValue>& row);
-  int64_t getInt(size_t col_num);
-  double getDouble(size_t col_num);
-  std::string getStr(size_t col_num);
+  Row(const std::vector<TargetValue>& row);
+  int64_t getIntScalarTargetValue(size_t col_idx);
+  float getFloatScalarTargetValue(size_t col_idx);
+  double getDoubleScalarTargetValue(size_t col_idx);
+  std::string getStrScalarTargetValue(size_t col_idx);
 
  private:
   std::vector<TargetValue> m_row;
@@ -39,10 +40,27 @@ class Row {
 
 class Cursor {
  public:
-  size_t getColCount();
-  size_t getRowCount();
-  Row getNextRow();
-  int getColType(uint32_t col_num);
+  ExecutorDeviceType getDeviceType();
+  Row getNextRow(const bool translate_strings, const bool decimal_to_double);
+  OneIntegerColumnRow getOneColRow(const size_t index);
+  size_t colCount();
+  size_t rowCount(const bool force_parallel);
+  void setCachedRowCount(const size_t row_count);
+  size_t entryCount();
+  bool definitelyHasNoRows();
+  int8_t* getDeviceEstimatorBuffer();
+  int8_t* getHostEstimatorBuffer();
+  void setQueueTime(const int64_t queue_time);
+  int64_t getQueueTime();
+  int64_t getRenderTime();
+  bool isTruncated();
+  bool isExplain();
+  bool isGeoColOnGpu(const size_t col_idx);
+  int getDeviceId();
+  const bool isPermutationBufferEmpty();
+  size_t getLimit();
+
+  // int getColType(uint32_t col_num);
 };
 
 class DBEngine {

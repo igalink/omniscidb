@@ -19,8 +19,6 @@
 #include <boost/variant.hpp>
 #include <iostream>
 #include "Catalog/Catalog.h"
-#include "QueryEngine/CompilationOptions.h"
-#include "QueryEngine/ResultSet.h"
 #include "QueryRunner/QueryRunner.h"
 #include "Shared/Logger.h"
 #include "Shared/mapdpath.h"
@@ -28,7 +26,7 @@
 
 namespace EmbeddedDatabase {
 
-enum class ColumnType : uint32_t { Unknown, Integer, Double, Float, String, Array };
+// enum class ColumnType : uint32_t { Unknown, Integer, Double, Float, String, Array };
 
 /**
  * Cursor internal implementation
@@ -39,46 +37,90 @@ class CursorImpl : public Cursor {
              std::shared_ptr<Data_Namespace::DataMgr> data_mgr)
       : m_result_set(result_set), m_data_mgr(data_mgr) {}
 
-  size_t getColCount() { return m_result_set->colCount(); }
+  ExecutorDeviceType getDeviceType() { return m_result_set->getDeviceType(); }
 
-  size_t getRowCount() { return m_result_set->rowCount(); }
-
-  Row getNextRow() {
-    auto row = m_result_set->getNextRow(true, false);
+  Row getNextRow(const bool translate_strings, const bool decimal_to_double) {
+    const auto row = m_result_set->getNextRow(translate_strings, decimal_to_double);
     if (row.empty()) {
-      return Row();
+      return Row{};
     }
     return Row(row);
   }
 
-  ColumnType getColType(uint32_t col_num) {
-    if (col_num < getColCount()) {
-      SQLTypeInfo type_info = m_result_set->getColType(col_num);
-      switch (type_info.get_type()) {
-        case kNUMERIC:
-        case kDECIMAL:
-        case kINT:
-        case kSMALLINT:
-        case kBIGINT:
-          return ColumnType::Integer;
-
-        case kDOUBLE:
-          return ColumnType::Double;
-
-        case kFLOAT:
-          return ColumnType::Float;
-
-        case kCHAR:
-        case kVARCHAR:
-        case kTEXT:
-          return ColumnType::String;
-
-        default:
-          return ColumnType::Unknown;
-      }
-    }
-    return ColumnType::Unknown;
+  OneIntegerColumnRow getOneColRow(const size_t index) {
+    return m_result_set->getOneColRow(index);
   }
+
+  size_t colCount() { return m_result_set->colCount(); }
+
+  size_t rowCount(const bool force_parallel) {
+    return m_result_set->rowCount(force_parallel);
+  }
+
+  void setCachedRowCount(const size_t row_count) {
+    return m_result_set->setCachedRowCount(row_count);
+  }
+
+  size_t entryCount() { return m_result_set->entryCount(); }
+
+  bool definitelyHasNoRows() { return m_result_set->definitelyHasNoRows(); }
+
+  int8_t* getDeviceEstimatorBuffer() { return m_result_set->getDeviceEstimatorBuffer(); }
+
+  int8_t* getHostEstimatorBuffer() { return m_result_set->getHostEstimatorBuffer(); }
+
+  void setQueueTime(const int64_t queue_time) {
+    return m_result_set->setQueueTime(queue_time);
+  }
+
+  int64_t getQueueTime() { return m_result_set->getQueueTime(); }
+
+  int64_t getRenderTime() { return m_result_set->getRenderTime(); }
+
+  bool isTruncated() { return m_result_set->isTruncated(); }
+
+  bool isExplain() { return m_result_set->isExplain(); }
+
+  bool isGeoColOnGpu(const size_t col_idx) {
+    return m_result_set->isGeoColOnGpu(col_idx);
+  }
+
+  int getDeviceId() { return m_result_set->getDeviceId(); }
+
+  const bool isPermutationBufferEmpty() {
+    return m_result_set->isPermutationBufferEmpty();
+  }
+
+  size_t getLimit() { return m_result_set->getLimit(); }
+
+  // ColumnType getColType(uint32_t col_num) {
+  //   if (col_num < getColCount()) {
+  //     SQLTypeInfo type_info = m_result_set->getColType(col_num);
+  //     switch (type_info.get_type()) {
+  //       case kNUMERIC:
+  //       case kDECIMAL:
+  //       case kINT:
+  //       case kSMALLINT:
+  //       case kBIGINT:
+  //         return ColumnType::Integer;
+
+  //       case kDOUBLE:
+  //         return ColumnType::Double;
+
+  //       case kFLOAT:
+  //         return ColumnType::Float;
+
+  //       case kCHAR:
+  //       case kVARCHAR:
+  //       case kTEXT:
+  //         return ColumnType::String;
+
+  //       default:
+  //         return ColumnType::Unknown;
+  //     }
+  //   }
+  //   return ColumnType::Unknown;
+  // }
 
  private:
   std::shared_ptr<ResultSet> m_result_set;
@@ -195,41 +237,54 @@ Cursor* DBEngine::executeDML(std::string query) {
 
 /********************************************* Row methods */
 
-Row::Row() {}
+Row::Row() : m_row() {}
 
-Row::Row(std::vector<TargetValue>& row) : m_row(std::move(row)) {}
+Row::Row(const std::vector<TargetValue>& row) : m_row(row) {}
 
-int64_t Row::getInt(size_t col_num) {
-  if (col_num < m_row.size()) {
-    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_num]);
+int64_t Row::getIntScalarTargetValue(size_t col_idx) {
+  if (col_idx < m_row.size()) {
+    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_idx]);
     const auto value = boost::get<int64_t>(scalar_value);
     return *value;
   }
-  return 0;
+  std::cout << "Index is out of bound" << std::endl;
+  return static_cast<int64_t>(-1);
 }
 
-double Row::getDouble(size_t col_num) {
-  if (col_num < m_row.size()) {
-    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_num]);
+float Row::getFloatScalarTargetValue(size_t col_idx) {
+  if (col_idx < m_row.size()) {
+    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_idx]);
+    const auto value = boost::get<float>(scalar_value);
+    return *value;
+  }
+  std::cout << "Index is out of bound" << std::endl;
+  return -1.0F;
+}
+
+double Row::getDoubleScalarTargetValue(size_t col_idx) {
+  if (col_idx < m_row.size()) {
+    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_idx]);
     const auto value = boost::get<double>(scalar_value);
     return *value;
   }
-  return 0.;
+  std::cout << "Index is out of bound" << std::endl;
+  return -1.0;
 }
 
-std::string Row::getStr(size_t col_num) {
-  if (col_num < m_row.size()) {
-    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_num]);
+std::string Row::getStrScalarTargetValue(size_t col_idx) {
+  if (col_idx < m_row.size()) {
+    const auto scalar_value = boost::get<ScalarTargetValue>(&m_row[col_idx]);
     auto value = boost::get<NullableString>(scalar_value);
     bool is_null = !value || boost::get<void*>(value);
     if (is_null) {
-      return "Empty";
+      return "Nullable string";
     } else {
-      auto value_notnull = boost::get<std::string>(value);
-      return *value_notnull;
+      auto not_nullable_value = boost::get<std::string>(value);
+      return *not_nullable_value;
     }
   }
-  return "Out of range";
+  std::cout << "Index is out of bound" << std::endl;
+  return "";
 }
 
 /********************************************* Cursor external methods*/
@@ -242,23 +297,104 @@ inline const CursorImpl* getImpl(const Cursor* ptr) {
   return (const CursorImpl*)ptr;
 }
 
-size_t Cursor::getColCount() {
+ExecutorDeviceType Cursor::getDeviceType() {
   CursorImpl* cursor = getImpl(this);
-  return cursor->getColCount();
+  return cursor->getDeviceType();
 }
 
-size_t Cursor::getRowCount() {
+Row Cursor::getNextRow(const bool translate_strings, const bool decimal_to_double) {
   CursorImpl* cursor = getImpl(this);
-  return cursor->getRowCount();
+  return cursor->getNextRow(translate_strings, decimal_to_double);
 }
 
-Row Cursor::getNextRow() {
+OneIntegerColumnRow Cursor::getOneColRow(const size_t index) {
   CursorImpl* cursor = getImpl(this);
-  return cursor->getNextRow();
+  return cursor->getOneColRow(index);
 }
 
-int Cursor::getColType(uint32_t col_num) {
+size_t Cursor::colCount() {
   CursorImpl* cursor = getImpl(this);
-  return (int)cursor->getColType(col_num);
+  return cursor->colCount();
 }
+
+size_t Cursor::rowCount(const bool force_parallel) {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->rowCount(force_parallel);
+}
+
+void Cursor::setCachedRowCount(const size_t row_count) {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->setCachedRowCount(row_count);
+}
+
+size_t Cursor::entryCount() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->entryCount();
+}
+
+bool Cursor::definitelyHasNoRows() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->definitelyHasNoRows();
+}
+
+int8_t* Cursor::getDeviceEstimatorBuffer() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getDeviceEstimatorBuffer();
+}
+
+int8_t* Cursor::getHostEstimatorBuffer() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getHostEstimatorBuffer();
+}
+
+void Cursor::setQueueTime(const int64_t queue_time) {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->setQueueTime(queue_time);
+}
+
+int64_t Cursor::getQueueTime() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getQueueTime();
+}
+
+int64_t Cursor::getRenderTime() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getRenderTime();
+}
+
+bool Cursor::isTruncated() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->isTruncated();
+}
+
+bool Cursor::isExplain() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->isExplain();
+}
+
+bool Cursor::isGeoColOnGpu(const size_t col_idx) {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->isGeoColOnGpu(col_idx);
+}
+
+int Cursor::getDeviceId() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getDeviceId();
+}
+
+const bool Cursor::isPermutationBufferEmpty() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->isPermutationBufferEmpty();
+}
+
+size_t Cursor::getLimit() {
+  CursorImpl* cursor = getImpl(this);
+  return cursor->getLimit();
+}
+
+// int Cursor::getColType(uint32_t col_num) {
+//   CursorImpl* cursor = getImpl(this);
+//   return (int)cursor->getColType(col_num);
+// }
+
 }  // namespace EmbeddedDatabase
