@@ -7,26 +7,98 @@ from libcpp cimport bool
 from libcpp.pair cimport pair
 from libcpp.vector cimport vector
 from datetime import datetime
+from collections import namedtuple
 
 import os
 
 from DBEngine cimport *
+from DBEngine cimport ColumnType as _ColumnType
+from DBEngine cimport ColumnEncoding as _ColumnEncoding
+from DBEngine cimport ColumnDetails as _ColumnDetails
 from DBEngine cimport Row as _Row
 from DBEngine cimport Cursor as _Cursor
 from DBEngine cimport DBEngine
 from pyarrow.lib cimport *
 
+cdef class PyColumnType:
+  cdef _ColumnType c_column_type
+
+  def __cinit__(self, int val):
+    self.c_column_type = <_ColumnType> val
+
+  def __eq__(self, val):
+    if isinstance(val, int):
+        return val == <int> self.c_column_type
+    return False
+
+  def to_str(self):
+    cdef c = {
+        <int>SMALLINT : "SMALLINT",
+        <int>INT : "INT",
+        <int>BIGINT : "BIGINT",
+        <int>FLOAT : "FLOAT",
+        <int>DECIMAL : "DECIMAL",
+        <int>DOUBLE : "DOUBE",
+        <int>STR : "STR",
+        <int>TIME : "TIME",
+        <int>TIMESTAMP : "TIMESTAMP",
+        <int>DATE : "DATE",
+        <int>BOOL : "BOOL",
+        <int>INTERVAL_DAY_TIME : "INTERVAL_DAY_TIME",
+        <int>INTERVAL_YEAR_MONTH : "INTERVAL_YEAR_MONTH",
+        <int>POINT : "POINT",
+        <int>LINESTRING : "LINESTRING",
+        <int>POLYGON : "POLYGON",
+        <int>MULTIPOLYGON : "MULTIPOLYGON",
+        <int>TINYINT : "TINYINT",
+        <int>GEOMETRY : "GEOMETRY",
+        <int>GEOGRAPHY : "TIME",
+        <int>UNKNOWN : "UNKNOWN"}
+    return c[<int>self.c_column_type]
+
+cdef class PyColumnEncoding:
+  cdef _ColumnEncoding c_column_enc
+
+  def __cinit__(self, int val):
+    self.c_column_enc = <_ColumnEncoding> val
+
+  def __eq__(self, val):
+    if isinstance(val, int):
+        return val == <int> self.c_column_enc
+    return False
+
+  def to_str(self):
+    cdef c = {
+        <int>NONE : "NONE",
+        <int>FIXED : "FIXED",
+        <int>RL : "RL",
+        <int>DIFF : "DIFF",
+        <int>DICT : "DICT",
+        <int>SPARSE : "SPARSE",
+        <int>GEOINT : "GEOINT",
+        <int>DATE_IN_DAYS : "DATE_IN_DAYS"}
+    return c[<int>self.c_column_enc]
+
+
+cdef class PyColumnDetails:
+    cdef _ColumnDetails c_col
+    def __cinit__(self, string col_name, int col_type, int col_enc, bool nullable, bool is_array, int precision, int scale, int comp_param):
+        self.c_col = _ColumnDetails(col_name, <_ColumnType>col_type, <_ColumnEncoding>col_enc, nullable, is_array, precision, scale, comp_param)
+#    def __dealloc__(self):
+#        del self.c_col
+
+
 cdef class PyRow:
     cdef _Row c_row  #Hold a C++ instance which we're wrapping
 
-    def getInt(self, col):
-        return self.c_row.getInt(col);
-
-    def getDouble(self, col):
-        return self.c_row.getDouble(col);
-
-    def getStr(self, col):
-        return self.c_row.getStr(col);
+    def getField(self, col_num, col_type):
+        if col_type == <int>INT:
+            return self.c_row.getInt(col_num);
+        if col_type == <int>DOUBLE:
+            return self.c_row.getDouble(col_num);
+        if col_type == <int>STR:
+            return self.c_row.getStr(col_num);
+        return "Unknown type"
 
 
 cdef class PyCursor:
@@ -45,9 +117,8 @@ cdef class PyCursor:
         return obj
 
     def getColType(self, uint32_t pos):
-#        obj = PyColumnType()
-#        obj.c_col_type = self.c_cursor.GetColType(pos)
-        return self.c_cursor.getColType(pos)
+        obj = PyColumnType(<int>self.c_cursor.getColType(pos))
+        return obj
 
     def showRows(self, int max_rows):
         col_count = self.colCount();
@@ -59,19 +130,7 @@ cdef class PyCursor:
         for i in range(col_count):
             ct = self.getColType(i)
             col_types.append(ct)
-            if ct == 1:
-                col_types_str.append('int')
-            elif ct == 2:
-                col_types_str.append('double')
-            elif ct == 3:
-                col_types_str.append('float')
-            elif ct == 4:
-                col_types_str.append('string')
-            elif ct == 5:
-                col_types_str.append('array')
-            else:
-                col_types_str.append('Unknown')
-
+            col_types_str.append(ct.to_str())
         format_row = "{:>12}" * (len(col_types) + 1)
         """print(format_row.format("", *col_types))"""
         print(*col_types_str)
@@ -79,25 +138,7 @@ cdef class PyCursor:
             r = self.nextRow()
             fields = []
             for f in range(col_count):
-                if col_types[f] == 1:
-                    """ColumnType.eINT:"""
-                    fields.append(r.getInt(f))
-                elif col_types[f] == 2:
-                    """ColumnType.eDBL:"""
-                    fields.append(r.getDouble(f))
-                elif col_types[f] == 3:
-                    """ColumnType.eFLT:"""
-                    fields.append('FLOAT')
-#                    fields.append(r.getFloat(f))
-                elif col_types[f] == 4:
-                    """ColumnType.eSTR:"""
-                    fields.append(r.getStr(f))
-                elif col_types[f] == 5:
-                    """ColumnType.eARR:"""
-                    fields.append('ARRAY');
-                else:
-                    """fields.append(r.getStr(f));"""
-                    fields.append('UNKNOWN');
+                fields.append(r.getField(f, col_types[f]))
 #            print(format_row.format("", *fields))
             print(*fields)
 
@@ -107,12 +148,12 @@ cdef class PyCursor:
         print('getArrowRecordBatch - END')
         if self.c_batch.get() is NULL:
             print('Record batch is NULL')
-#            return 55555
-#        return self.c_batch.get().num_rows()
-#        return pyarrow_wrap_batch(self.c_batch.get())
-#        dir(pa)
         return pyarrow_wrap_batch(self.c_batch)
 
+ColumnDetailsTp = namedtuple("ColumnDetails", ["name", "type", "nullable",
+                                             "precision", "scale",
+                                             "comp_param", "encoding",
+                                             "is_array"])
 cdef class PyDbEngine:
     cdef DBEngine* c_dbe  #Hold a C++ instance which we're wrapping
 
@@ -142,3 +183,13 @@ cdef class PyDbEngine:
         obj = PyCursor();
         obj.c_cursor = self.c_dbe.executeDML(query);
         return obj.getArrowRecordBatch().to_pandas()
+
+    def get_table_details(self, table_name):
+        cdef vector[ColumnDetails] table_details = self.c_dbe.getTableDetails(table_name)
+        return [
+            ColumnDetailsTp(x.col_name, PyColumnType(<int>x.col_type).to_str(),
+                      x.nullable, x.precision, x.scale, x.comp_param,
+                      PyColumnEncoding(<int>x.encoding).to_str(), x.is_array)
+            for x in table_details
+        ]
+# std::vector<ColumnDetails> getTableDetails( table_name)

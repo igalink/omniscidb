@@ -29,7 +29,109 @@
 
 namespace EmbeddedDatabase {
 
-enum class ColumnType : uint32_t { Unknown, Integer, Double, Float, String, Array };
+inline ColumnType sqlToColumnType(const SQLTypes& type) {
+  switch (type) {
+    case kBOOLEAN:
+      return ColumnType::BOOL;
+    case kTINYINT:
+      return ColumnType::TINYINT;
+    case kSMALLINT:
+      return ColumnType::SMALLINT;
+    case kINT:
+      return ColumnType::INT;
+    case kBIGINT:
+      return ColumnType::BIGINT;
+    case kFLOAT:
+      return ColumnType::FLOAT;
+    case kNUMERIC:
+    case kDECIMAL:
+      return ColumnType::DECIMAL;
+    case kDOUBLE:
+      return ColumnType::DOUBLE;
+    case kTEXT:
+    case kVARCHAR:
+    case kCHAR:
+      return ColumnType::STR;
+    case kTIME:
+      return ColumnType::TIME;
+    case kTIMESTAMP:
+      return ColumnType::TIMESTAMP;
+    case kDATE:
+      return ColumnType::DATE;
+    case kINTERVAL_DAY_TIME:
+      return ColumnType::INTERVAL_DAY_TIME;
+    case kINTERVAL_YEAR_MONTH:
+      return ColumnType::INTERVAL_YEAR_MONTH;
+    case kPOINT:
+      return ColumnType::POINT;
+    case kLINESTRING:
+      return ColumnType::LINESTRING;
+    case kPOLYGON:
+      return ColumnType::POLYGON;
+    case kMULTIPOLYGON:
+      return ColumnType::MULTIPOLYGON;
+    case kGEOMETRY:
+      return ColumnType::GEOMETRY;
+    case kGEOGRAPHY:
+      return ColumnType::GEOGRAPHY;
+    default:
+      return ColumnType::UNKNOWN;
+  }
+  return ColumnType::UNKNOWN;
+}
+
+inline ColumnEncoding sqlToColumnEncoding(const EncodingType& type) {
+  switch (type) {
+    case kENCODING_NONE:
+      return ColumnEncoding::NONE;
+    case kENCODING_FIXED:
+      return ColumnEncoding::FIXED;
+    case kENCODING_RL:
+      return ColumnEncoding::RL;
+    case kENCODING_DIFF:
+      return ColumnEncoding::DIFF;
+    case kENCODING_DICT:
+      return ColumnEncoding::DICT;
+    case kENCODING_SPARSE:
+      return ColumnEncoding::SPARSE;
+    case kENCODING_GEOINT:
+      return ColumnEncoding::GEOINT;
+    case kENCODING_DATE_IN_DAYS:
+      return ColumnEncoding::DATE_IN_DAYS;
+    default:
+      return ColumnEncoding::NONE;
+  }
+  return ColumnEncoding::NONE;
+}
+//enum class ColumnType : uint32_t { Unknown, Integer, Double, Float, String, Array };
+
+ ColumnDetails::ColumnDetails()
+  : col_type(ColumnType::UNKNOWN)
+  , encoding(ColumnEncoding::NONE)
+  , nullable(false)
+  , is_array(false)
+  , precision(0)
+  , scale(0)
+  , comp_param(0)
+  {}
+
+ ColumnDetails::ColumnDetails(const std::string& _col_name,
+                ColumnType _col_type,
+                ColumnEncoding _encoding,
+                bool _nullable,
+                bool _is_array,
+                int _precision,
+                int _scale,
+                int _comp_param)
+  : col_name(_col_name)
+  , col_type(_col_type)
+  , encoding(_encoding)
+  , nullable(_nullable)
+  , is_array(_is_array)
+  , precision(_precision)
+  , scale(_scale)
+  , comp_param(_comp_param)
+  {}
 
 /**
  * Cursor internal implementation
@@ -61,24 +163,24 @@ class CursorImpl : public Cursor {
         case kINT:
         case kSMALLINT:
         case kBIGINT:
-          return ColumnType::Integer;
+          return ColumnType::INT;
 
         case kDOUBLE:
-          return ColumnType::Double;
+          return ColumnType::DOUBLE;
 
         case kFLOAT:
-          return ColumnType::Float;
+          return ColumnType::FLOAT;
 
         case kCHAR:
         case kVARCHAR:
         case kTEXT:
-          return ColumnType::String;
+          return ColumnType::STR;
 
         default:
-          return ColumnType::Unknown;
+          return ColumnType::UNKNOWN;
       }
     }
-    return ColumnType::Unknown;
+    return ColumnType::UNKNOWN;
   }
 
   std::shared_ptr<arrow::RecordBatch> getArrowRecordBatch() {
@@ -180,6 +282,56 @@ class DBEngineImpl : public DBEngine {
     }
   }
 
+  std::vector<ColumnDetails> getTableDetails(const std::string& table_name) {
+    std::vector<ColumnDetails> result;
+    if (m_query_runner) {
+      auto catalog = m_query_runner->getCatalog();
+      if (catalog) {
+         auto metadata = catalog->getMetadataForTable(table_name, false);
+        if (metadata) {
+          const auto col_descriptors =
+            catalog->getAllColumnMetadataForTable(metadata->tableId, true, true, true);
+          const auto deleted_cd = catalog->getDeletedColumn(metadata);
+          for (const auto cd : col_descriptors) {
+            if (cd == deleted_cd) {
+              continue;
+            }
+            auto ct = cd->columnType;
+            SQLTypes sql_type = ct.get_type();
+            EncodingType sql_enc = ct.get_compression();
+            ColumnType col_type = sqlToColumnType(sql_type);
+            ColumnEncoding col_enc = sqlToColumnEncoding(sql_enc);
+
+            int comp_param = 0;
+            if (col_enc == ColumnEncoding::DICT) {
+              // have to get the actual size of the encoding from the dictionary definition
+              const int dict_id = ct.get_comp_param();
+              auto dd = catalog->getMetadataForDict(dict_id, false);
+              if (dd) {
+                  comp_param = dd->dictNBits;
+              } else {
+                std::cout << "Dictionary doesn't exist" << std::endl;
+                //THROW_MAPD_EXCEPTION("Dictionary doesn't exist");
+              }
+            } else {
+              comp_param = ct.get_comp_param();
+              if (ct.is_date_in_days() && comp_param == 0) {
+                  comp_param = 32;
+              }
+            }
+
+            result.emplace_back(cd->columnName, col_type, col_enc,
+                                !ct.get_notnull(),
+                                sql_type == kARRAY,
+                                ct.get_precision(),
+                                ct.get_scale(), comp_param );
+          }
+        }
+      }
+    }
+    return result;
+  }
+
  private:
   std::string m_base_path;
   std::shared_ptr<Data_Namespace::DataMgr> m_data_mgr;
@@ -222,6 +374,11 @@ void DBEngine::executeDDL(std::string query) {
 Cursor* DBEngine::executeDML(std::string query) {
   DBEngineImpl* engine = getImpl(this);
   return engine->executeDML(query);
+}
+
+std::vector<ColumnDetails> DBEngine::getTableDetails(const std::string& table_name) {
+  DBEngineImpl* engine = getImpl(this);
+  return engine->getTableDetails(table_name);
 }
 
 /********************************************* Row methods */
@@ -288,9 +445,9 @@ Row Cursor::getNextRow() {
   return cursor->getNextRow();
 }
 
-int Cursor::getColType(uint32_t col_num) {
+ColumnType Cursor::getColType(uint32_t col_num) {
   CursorImpl* cursor = getImpl(this);
-  return (int)cursor->getColType(col_num);
+  return cursor->getColType(col_num);
 }
 
 std::shared_ptr<arrow::RecordBatch> Cursor::getArrowRecordBatch() {

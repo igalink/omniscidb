@@ -48,7 +48,25 @@ cdef extern from "QueryEngine/ResultSet.h":
         vector[TargetValue] getNextRow(const bool translate_strings, const bool decimal_to_double)
         TargetValue getRowAt(const size_t row_idx, const size_t col_idx, const bool translate_strings, const bool decimal_to_double)
 
-cdef extern from "DBEngine.h" namespace "EmbeddedDatabase":
+cdef extern from "DBEngine.h" namespace 'EmbeddedDatabase':
+    cdef cppclass ColumnType:
+        pass
+
+    cdef cppclass ColumnEncoding:
+        pass
+
+    cdef cppclass ColumnDetails:
+        string col_name
+        ColumnType col_type
+        ColumnEncoding encoding
+        bool nullable
+        bool is_array
+        int precision
+        int scale
+        int comp_param
+        ColumnDetails()
+        ColumnDetails(string,ColumnType,ColumnEncoding,bool,bool,int,int,int)
+
     cdef cppclass Row:
         int64_t getInt(size_t col)
         double getDouble(size_t col)
@@ -58,15 +76,48 @@ cdef extern from "DBEngine.h" namespace "EmbeddedDatabase":
         size_t getColCount()
         size_t getRowCount()
         Row getNextRow()
-        int getColType(uint32_t nPos)
+        ColumnType getColType(uint32_t nPos)
         shared_ptr[CRecordBatch] getArrowRecordBatch()
 
     cdef cppclass DBEngine:
         void executeDDL(string)
         Cursor* executeDML(string)
 #        shared_ptr[ResultSet] executeDML(string)
+        vector[ColumnDetails] getTableDetails(string)
         void reset()
         @staticmethod
         DBEngine* create(string)
 
+cdef extern from "DBEngine.h" namespace 'EmbeddedDatabase::ColumnType':
+    cdef ColumnType SMALLINT
+    cdef ColumnType INT
+    cdef ColumnType BIGINT
+    cdef ColumnType FLOAT
+    cdef ColumnType DECIMAL
+    cdef ColumnType DOUBLE
+    cdef ColumnType STR
+    cdef ColumnType TIME
+    cdef ColumnType TIMESTAMP
+    cdef ColumnType DATE
+    cdef ColumnType BOOL
+    cdef ColumnType INTERVAL_DAY_TIME
+    cdef ColumnType INTERVAL_YEAR_MONTH
+    cdef ColumnType POINT
+    cdef ColumnType LINESTRING
+    cdef ColumnType POLYGON
+    cdef ColumnType MULTIPOLYGON
+    cdef ColumnType TINYINT
+    cdef ColumnType GEOMETRY
+    cdef ColumnType GEOGRAPHY
+    cdef ColumnType UNKNOWN
 
+
+cdef extern from "DBEngine.h" namespace 'EmbeddedDatabase::ColumnEncoding':
+    cdef ColumnEncoding NONE
+    cdef ColumnEncoding FIXED
+    cdef ColumnEncoding RL
+    cdef ColumnEncoding DIFF
+    cdef ColumnEncoding DICT
+    cdef ColumnEncoding SPARSE
+    cdef ColumnEncoding GEOINT
+    cdef ColumnEncoding DATE_IN_DAYS
