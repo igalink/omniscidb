@@ -3,8 +3,8 @@ import ctypes
 import pandas
 ctypes._dlopen('libDBEngine.so', ctypes.RTLD_GLOBAL)
 obj = dbe.PyDbEngine('data')
-#sch = obj.get_table_details('omnisci_states')
-sch = pandas.DataFrame(
+sch = obj.get_table_details('omnisci_states')
+pdf = pandas.DataFrame(
     [
         (
             x.name,
@@ -26,6 +26,7 @@ sch = pandas.DataFrame(
     ],
 )
 print(sch)
+print(pdf)
 #res = obj.executeDML('SELECT id, abbr, name FROM omnisci_states')
 #print('Rows in ResultSet: ', res.rowCount())
 #res.showRows(15)

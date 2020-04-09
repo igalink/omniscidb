@@ -290,41 +290,44 @@ class DBEngineImpl : public DBEngine {
          auto metadata = catalog->getMetadataForTable(table_name, false);
         if (metadata) {
           const auto col_descriptors =
-            catalog->getAllColumnMetadataForTable(metadata->tableId, true, true, true);
+            catalog->getAllColumnMetadataForTable(metadata->tableId, false, true, false);
           const auto deleted_cd = catalog->getDeletedColumn(metadata);
           for (const auto cd : col_descriptors) {
             if (cd == deleted_cd) {
               continue;
             }
+            ColumnDetails col_details;
+            col_details.col_name = cd->columnName;
             auto ct = cd->columnType;
             SQLTypes sql_type = ct.get_type();
             EncodingType sql_enc = ct.get_compression();
-            ColumnType col_type = sqlToColumnType(sql_type);
-            ColumnEncoding col_enc = sqlToColumnEncoding(sql_enc);
-
-            int comp_param = 0;
-            if (col_enc == ColumnEncoding::DICT) {
+            col_details.col_type = sqlToColumnType(sql_type);
+            col_details.encoding = sqlToColumnEncoding(sql_enc);
+            col_details.nullable = !ct.get_notnull();
+            col_details.is_array = (sql_type == kARRAY);
+            if (IS_GEO(sql_type)) {
+              col_details.precision = static_cast<int>(ct.get_subtype());
+              col_details.scale = ct.get_output_srid();
+            } else {
+              col_details.precision = ct.get_precision();
+              col_details.scale = ct.get_scale();
+            }
+            if (col_details.encoding == ColumnEncoding::DICT) {
               // have to get the actual size of the encoding from the dictionary definition
               const int dict_id = ct.get_comp_param();
               auto dd = catalog->getMetadataForDict(dict_id, false);
               if (dd) {
-                  comp_param = dd->dictNBits;
+                col_details.comp_param = dd->dictNBits;
               } else {
                 std::cout << "Dictionary doesn't exist" << std::endl;
-                //THROW_MAPD_EXCEPTION("Dictionary doesn't exist");
               }
             } else {
-              comp_param = ct.get_comp_param();
-              if (ct.is_date_in_days() && comp_param == 0) {
-                  comp_param = 32;
+              col_details.comp_param = ct.get_comp_param();
+              if (ct.is_date_in_days() && col_details.comp_param == 0) {
+                col_details.comp_param = 32;
               }
             }
-
-            result.emplace_back(cd->columnName, col_type, col_enc,
-                                !ct.get_notnull(),
-                                sql_type == kARRAY,
-                                ct.get_precision(),
-                                ct.get_scale(), comp_param );
+            result.push_back(col_details);
           }
         }
       }

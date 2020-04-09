@@ -27,7 +27,7 @@
 
 namespace EmbeddedDatabase {
 
-enum class ColumnType : uint32_t {
+enum class ColumnType {
     SMALLINT = 0,
     INT = 1,
     BIGINT = 2,
@@ -51,17 +51,7 @@ enum class ColumnType : uint32_t {
     UNKNOWN = 20
 };
 
-/*
-enum class ColumnType : uint32_t {
- Unknown = 0,
- Integer = 1,
- Double  = 2,
- Float   = 3,
- String  = 4
-};
-*/
-
-enum class ColumnEncoding : uint32_t {
+enum class ColumnEncoding {
  NONE   = 0,
  FIXED  = 1,
  RL     = 2,
