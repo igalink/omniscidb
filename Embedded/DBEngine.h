@@ -21,9 +21,70 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <arrow/api.h>
+#include <arrow/ipc/api.h>
 #include "QueryEngine/TargetValue.h"
 
 namespace EmbeddedDatabase {
+
+enum class ColumnType {
+    SMALLINT = 0,
+    INT = 1,
+    BIGINT = 2,
+    FLOAT = 3,
+    DECIMAL = 4,
+    DOUBLE = 5,
+    STR = 6,
+    TIME = 7,
+    TIMESTAMP = 8,
+    DATE = 9,
+    BOOL = 10,
+    INTERVAL_DAY_TIME = 11,
+    INTERVAL_YEAR_MONTH = 12,
+    POINT = 13,
+    LINESTRING = 14,
+    POLYGON = 15,
+    MULTIPOLYGON = 16,
+    TINYINT = 17,
+    GEOMETRY = 18,
+    GEOGRAPHY = 19,
+    UNKNOWN = 20
+};
+
+enum class ColumnEncoding {
+ NONE   = 0,
+ FIXED  = 1,
+ RL     = 2,
+ DIFF   = 3,
+ DICT   = 4,
+ SPARSE = 5,
+ GEOINT = 6,
+ DATE_IN_DAYS = 7
+};
+
+
+class ColumnDetails {
+ public:
+  std::string col_name;
+  ColumnType col_type;
+  ColumnEncoding encoding;
+  bool nullable;
+  bool is_array;
+  int precision;
+  int scale;
+  int comp_param;
+
+  ColumnDetails();
+
+  ColumnDetails(const std::string& col_name,
+                ColumnType col_type,
+                ColumnEncoding encoding,
+                bool nullable,
+                bool is_array,
+                int precision,
+                int scale,
+                int comp_param);
+};
 
 class Row {
  public:
@@ -42,7 +103,8 @@ class Cursor {
   size_t getColCount();
   size_t getRowCount();
   Row getNextRow();
-  int getColType(uint32_t col_num);
+  ColumnType getColType(uint32_t col_num);
+  std::shared_ptr<arrow::RecordBatch> getArrowRecordBatch();
 };
 
 class DBEngine {
@@ -50,7 +112,9 @@ class DBEngine {
   void reset();
   void executeDDL(std::string query);
   Cursor* executeDML(std::string query);
-  static DBEngine* create(std::string path);
+  static DBEngine* create(std::string path, int calcite_port);
+  std::vector<std::string> getTables();
+  std::vector<ColumnDetails> getTableDetails(const std::string& table_name);
 
  protected:
   DBEngine() {}
