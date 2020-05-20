@@ -42,8 +42,8 @@ using namespace std;
 using namespace TestHelpers;
 
 extern bool g_use_date_in_days_default_encoding;
-
 extern size_t g_leaf_count;
+extern bool g_is_test_env;
 
 namespace {
 
@@ -972,6 +972,7 @@ class ImportTest : public ::testing::Test {
 };
 
 #ifdef ENABLE_IMPORT_PARQUET
+
 // parquet test cases
 TEST_F(ImportTest, One_parquet_file_1k_rows_in_10_groups) {
   EXPECT_TRUE(
@@ -981,6 +982,14 @@ TEST_F(ImportTest, One_parquet_file) {
   EXPECT_TRUE(import_test_local_parquet(
       "trip.parquet",
       "part-00000-027865e6-e4d9-40b9-97ff-83c5c5531154-c000.snappy.parquet",
+      100,
+      1.0));
+  EXPECT_TRUE(import_test_parquet_with_null(100));
+}
+TEST_F(ImportTest, One_parquet_file_gzip) {
+  EXPECT_TRUE(import_test_local_parquet(
+      "trip_gzip.parquet",
+      "part-00000-10535b0e-9ae5-4d8d-9045-3c70593cc34b-c000.gz.parquet",
       100,
       1.0));
   EXPECT_TRUE(import_test_parquet_with_null(100));
@@ -995,6 +1004,9 @@ TEST_F(ImportTest, One_parquet_file_drop) {
 TEST_F(ImportTest, All_parquet_file) {
   EXPECT_TRUE(import_test_local_parquet("trip.parquet", "*.parquet", 1200, 1.0));
   EXPECT_TRUE(import_test_parquet_with_null(1200));
+}
+TEST_F(ImportTest, All_parquet_file_gzip) {
+  EXPECT_TRUE(import_test_local_parquet("trip_gzip.parquet", "*.parquet", 1200, 1.0));
 }
 TEST_F(ImportTest, All_parquet_file_drop) {
   EXPECT_TRUE(import_test_local_parquet("trip+1.parquet", "*.parquet", 1200, 1.0));
@@ -1654,6 +1666,8 @@ TEST_F(ImportTest, S3_GCS_One_geo_file) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  g_is_test_env = true;
+
   testing::InitGoogleTest(&argc, argv);
 
   namespace po = boost::program_options;

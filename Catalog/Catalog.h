@@ -58,6 +58,8 @@
 
 #include "LeafHostInfo.h"
 
+enum GetTablesType { GET_PHYSICAL_TABLES_AND_VIEWS, GET_PHYSICAL_TABLES, GET_VIEWS };
+
 namespace Parser {
 
 class SharedDictionaryDef;
@@ -191,10 +193,21 @@ class Catalog final {
   std::vector<const TableDescriptor*> getPhysicalTablesDescriptors(
       const TableDescriptor* logicalTableDesc) const;
 
+  /**
+   * Get names of all tables accessible to user.
+   *
+   * @param user - user to retrieve table names for
+   * @param get_tables_type - enum indicating if tables, views or tables & views
+   * should be returned
+   * @return table_names - vector of table names accessible by user
+   */
+  std::vector<std::string> getTableNamesForUser(
+      const UserMetadata& user,
+      const GetTablesType get_tables_type) const;
+
   int32_t getTableEpoch(const int32_t db_id, const int32_t table_id) const;
   void setTableEpoch(const int db_id, const int table_id, const int new_epoch);
   int getDatabaseId() const { return currentDB_.dbId; }
-
   SqliteConnector& getSqliteConnector() { return sqliteConnector_; }
   void roll(const bool forward);
   DictRef addDictionary(ColumnDescriptor& cd);
@@ -204,6 +217,7 @@ class Catalog final {
 
   static void set(const std::string& dbName, std::shared_ptr<Catalog> cat);
   static std::shared_ptr<Catalog> get(const std::string& dbName);
+  static std::shared_ptr<Catalog> get(const int32_t db_id);
   static std::shared_ptr<Catalog> get(const std::string& basePath,
                                       const DBMetadata& curDB,
                                       std::shared_ptr<Data_Namespace::DataMgr> dataMgr,
@@ -231,6 +245,9 @@ class Catalog final {
   std::vector<std::string> getTableDictDirectories(const TableDescriptor* td) const;
   std::string getColumnDictDirectory(const ColumnDescriptor* cd) const;
   std::string dumpSchema(const TableDescriptor* td) const;
+  std::string dumpCreateTable(const TableDescriptor* td,
+                              bool multiline_formatting = true,
+                              bool dump_defaults = false) const;
 
   /**
    * Creates a new foreign server DB object.
@@ -248,25 +265,45 @@ class Catalog final {
    * Gets a pointer to a struct containing foreign server details.
    *
    * @param server_name - Name of foreign server whose details will be fetched
-   * @param skip_cache - flag indicating whether or not to skip in-memory cache of foreign
-   * server struct when attempting to fetch foreign server details. This flag is mainly
-   * used for testing
    * @return pointer to a struct containing foreign server details. nullptr is returned if
    * no foreign server exists with the given name
    */
-  foreign_storage::ForeignServer* getForeignServer(const std::string& server_name,
-                                                   const bool skip_cache = false);
+  foreign_storage::ForeignServer* getForeignServer(const std::string& server_name) const;
+
+  /**
+   * Gets a pointer to a struct containing foreign server details.
+   * Skip in-memory cache of foreign server struct when attempting to fetch foreign server
+   * details. This is mainly used for testing.
+   *
+   * @param server_name - Name of foreign server whose details will be fetched
+   * @return pointer to a struct containing foreign server details. nullptr is returned if
+   * no foreign server exists with the given name
+   */
+  foreign_storage::ForeignServer* getForeignServerSkipCache(
+      const std::string& server_name);
 
   /**
    * Drops/deletes a foreign server DB object.
    *
    * @param server_name - Name of foreign server that will be deleted
-   * @param if_exists - flag indicating whether or not an attempt to delete a foreign
-   * server should occur if a server with the same name does not exists. An exception is
-   * thrown if this flag is set to "false" and an attempt is made to delete a nonexistent
-   * foreign server
    */
-  void dropForeignServer(const std::string& server_name, bool if_exists);
+  void dropForeignServer(const std::string& server_name);
+
+  /**
+   * Performs a query on all foreign servers accessible to user with optional filter,
+   * and returns pointers toresulting server objects
+   *
+   * @param filters - Json Value representing SQL WHERE clause to filter results, eg.:
+   * "WHERE attribute1 = value1 AND attribute2 LIKE value2", or Null Value
+   *  Array of Values with attribute, value, operator, and chain specifier after first
+   * entry
+   * @param user - user to retrieve server names
+   * @param results - results returned as a vector of pointers to
+   * foreign_storage::ForeignServer
+   */
+  void getForeignServersForUser(const rapidjson::Value* filters,
+                                const UserMetadata& user,
+                                std::vector<foreign_storage::ForeignServer*>& results);
 
   /**
    * Creates default local file servers (if they don't already exist).

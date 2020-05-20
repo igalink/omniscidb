@@ -67,6 +67,7 @@ llvm::Value* CodeGenerator::codegenCast(llvm::Value* operand_lv,
     CHECK(operand_ti.is_integer() || operand_ti.is_decimal() || operand_ti.is_time() ||
           operand_ti.is_boolean());
     if (operand_ti.is_boolean()) {
+      // cast boolean to int8
       CHECK(operand_lv->getType()->isIntegerTy(1) ||
             operand_lv->getType()->isIntegerTy(8));
       if (operand_lv->getType()->isIntegerTy(1)) {
@@ -75,6 +76,11 @@ llvm::Value* CodeGenerator::codegenCast(llvm::Value* operand_lv,
       if (ti.is_boolean()) {
         return operand_lv;
       }
+    }
+    if (operand_ti.is_integer() && operand_lv->getType()->isIntegerTy(8) &&
+        ti.is_boolean()) {
+      // cast int8 to boolean
+      return codegenCastBetweenIntTypes(operand_lv, operand_ti, ti);
     }
     if (operand_ti.get_type() == kTIMESTAMP && ti.get_type() == kDATE) {
       // Maybe we should instead generate DatetruncExpr directly from RelAlgTranslator
@@ -218,12 +224,16 @@ llvm::Value* CodeGenerator::codegenCastFromString(llvm::Value* operand_lv,
     if (co.device_type == ExecutorDeviceType::GPU) {
       throw QueryMustRunOnCpu();
     }
+    const int64_t string_dictionary_ptr =
+        operand_ti.get_comp_param() == 0
+            ? reinterpret_cast<int64_t>(
+                  executor()->getRowSetMemoryOwner()->getLiteralStringDictProxy())
+            : reinterpret_cast<int64_t>(executor()->getStringDictionaryProxy(
+                  operand_ti.get_comp_param(), executor()->getRowSetMemoryOwner(), true));
     return cgen_state_->emitExternalCall(
         "string_decompress",
         get_int_type(64, cgen_state_->context_),
-        {operand_lv,
-         cgen_state_->llInt(int64_t(executor()->getStringDictionaryProxy(
-             operand_ti.get_comp_param(), executor()->getRowSetMemoryOwner(), true)))});
+        {operand_lv, cgen_state_->llInt(string_dictionary_ptr)});
   }
   CHECK(operand_is_const);
   CHECK_EQ(kENCODING_DICT, ti.get_compression());

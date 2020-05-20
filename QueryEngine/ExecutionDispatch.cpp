@@ -22,6 +22,7 @@
 #include "Execute.h"
 #include "ExternalExecutor.h"
 #include "SerializeToSql.h"
+#include "Shared/misc.h"
 
 #include "DataMgr/BufferMgr/BufferMgr.h"
 
@@ -77,10 +78,14 @@ void Executor::ExecutionDispatch::runImpl(
   const auto memory_level = chosen_device_type == ExecutorDeviceType::GPU
                                 ? Data_Namespace::GPU_LEVEL
                                 : Data_Namespace::CPU_LEVEL;
-  const int outer_table_id = ra_exe_unit_.input_descs[0].getTableId();
   CHECK_GE(frag_list.size(), size_t(1));
+  // frag_list[0].table_id is how we tell which query we are running for UNION ALL.
+  const int outer_table_id = ra_exe_unit_.union_all
+                                 ? frag_list[0].table_id
+                                 : ra_exe_unit_.input_descs[0].getTableId();
   CHECK_EQ(frag_list[0].table_id, outer_table_id);
   const auto& outer_tab_frag_ids = frag_list[0].fragment_ids;
+
   CHECK_GE(chosen_device_id, 0);
   CHECK_LT(chosen_device_id, max_gpu_count);
   // need to own them while query executes
@@ -97,15 +102,25 @@ void Executor::ExecutionDispatch::runImpl(
     QueryFragmentDescriptor::computeAllTablesFragments(
         all_tables_fragments, ra_exe_unit_, query_infos_);
 
-    fetch_result = executor_->fetchChunks(column_fetcher,
-                                          ra_exe_unit_,
-                                          chosen_device_id,
-                                          memory_level,
-                                          all_tables_fragments,
-                                          frag_list,
-                                          cat_,
-                                          *chunk_iterators_ptr,
-                                          chunks);
+    fetch_result = ra_exe_unit_.union_all
+                       ? executor_->fetchUnionChunks(column_fetcher,
+                                                     ra_exe_unit_,
+                                                     chosen_device_id,
+                                                     memory_level,
+                                                     all_tables_fragments,
+                                                     frag_list,
+                                                     cat_,
+                                                     *chunk_iterators_ptr,
+                                                     chunks)
+                       : executor_->fetchChunks(column_fetcher,
+                                                ra_exe_unit_,
+                                                chosen_device_id,
+                                                memory_level,
+                                                all_tables_fragments,
+                                                frag_list,
+                                                cat_,
+                                                *chunk_iterators_ptr,
+                                                chunks);
     if (fetch_result.num_rows.empty()) {
       return;
     }
@@ -166,6 +181,7 @@ void Executor::ExecutionDispatch::runImpl(
                                                            frag_row_count.end(),
                                                            total_num_input_rows);
                   });
+    VLOG(2) << "total_num_input_rows=" << total_num_input_rows;
     // TODO(adb): we may want to take this early out for all queries, but we are most
     // likely to see this query pattern on the kernel per fragment path (e.g. with HAVING
     // 0=1)
@@ -227,6 +243,10 @@ void Executor::ExecutionDispatch::runImpl(
                                                ra_exe_unit_.input_descs.size(),
                                                do_render ? render_info_ : nullptr);
   } else {
+    if (ra_exe_unit_.union_all) {
+      VLOG(1) << "outer_table_id=" << outer_table_id
+              << " ra_exe_unit_.scan_limit=" << ra_exe_unit_.scan_limit;
+    }
     err = executor_->executePlanWithGroupBy(ra_exe_unit_,
                                             compilation_result,
                                             query_comp_desc.hoistLiterals(),
@@ -239,6 +259,7 @@ void Executor::ExecutionDispatch::runImpl(
                                             fetch_result.frag_offsets,
                                             &cat_.getDataMgr(),
                                             chosen_device_id,
+                                            outer_table_id,
                                             ra_exe_unit_.scan_limit,
                                             start_rowid,
                                             ra_exe_unit_.input_descs.size(),
@@ -246,13 +267,15 @@ void Executor::ExecutionDispatch::runImpl(
   }
   if (device_results) {
     std::list<std::shared_ptr<Chunk_NS::Chunk>> chunks_to_hold;
-    for (const auto chunk : chunks) {
+    for (const auto& chunk : chunks) {
       if (need_to_hold_chunk(chunk.get(), ra_exe_unit_)) {
         chunks_to_hold.push_back(chunk);
       }
     }
     device_results->holdChunks(chunks_to_hold);
     device_results->holdChunkIterators(chunk_iterators_ptr);
+  } else {
+    VLOG(1) << "null device_results.";
   }
   if (err) {
     throw QueryExecutionError(err);
@@ -344,9 +367,9 @@ void Executor::ExecutionDispatch::run(const ExecutorDeviceType chosen_device_typ
             frag_list,
             kernel_dispatch_mode,
             rowid_lookup_key);
-  } catch (const std::bad_alloc& e) {
-    throw QueryExecutionError(ERR_OUT_OF_CPU_MEM, e.what());
   } catch (const OutOfHostMemory& e) {
+    throw QueryExecutionError(ERR_OUT_OF_CPU_MEM, e.what());
+  } catch (const std::bad_alloc& e) {
     throw QueryExecutionError(ERR_OUT_OF_CPU_MEM, e.what());
   } catch (const OutOfRenderMemory& e) {
     throw QueryExecutionError(ERR_OUT_OF_RENDER_MEM, e.what());

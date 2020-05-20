@@ -62,12 +62,14 @@
 #include "Shared/measure.h"
 #include "Shared/shard_key.h"
 #include "TableArchiver/TableArchiver.h"
+#include "Utils/FsiUtils.h"
 #include "gen-cpp/CalciteServer.h"
 #include "parser.h"
 
 size_t g_leaf_count{0};
 bool g_test_drop_column_rollback{false};
 extern bool g_enable_experimental_string_functions;
+extern bool g_enable_fsi;
 
 using Catalog_Namespace::SysCatalog;
 using namespace std::string_literals;
@@ -1472,6 +1474,7 @@ void InsertStmt::analyze(const Catalog_Namespace::Catalog& catalog,
   if (td->isView) {
     throw std::runtime_error("Insert to views is not supported yet.");
   }
+  foreign_storage::validate_non_foreign_table_write(td);
   query.set_result_table_id(td->tableId);
   std::list<int> result_col_list;
   if (column_list.empty()) {
@@ -2070,9 +2073,25 @@ void get_table_definitions(TableDescriptor& td,
                            const std::list<ColumnDescriptor>& columns) {
   const auto it = tableDefFuncMap.find(boost::to_lower_copy<std::string>(*p->get_name()));
   if (it == tableDefFuncMap.end()) {
-    throw std::runtime_error("Invalid CREATE TABLE option " + *p->get_name() +
-                             ". Should be FRAGMENT_SIZE, PAGE_SIZE, MAX_ROWS, "
-                             "PARTITIONS, VACUUM, SORT_COLUMN or SHARD_COUNT.");
+    throw std::runtime_error(
+        "Invalid CREATE TABLE option " + *p->get_name() +
+        ". Should be FRAGMENT_SIZE, MAX_CHUNK_SIZE, PAGE_SIZE, MAX_ROWS, "
+        "PARTITIONS, SHARD_COUNT, VACUUM, SORT_COLUMN, or STORAGE_TYPE.");
+  }
+  return it->second(td, p.get(), columns);
+}
+
+static const std::map<const std::string, const TableDefFuncPtr> dataframeDefFuncMap = {
+    {"fragment_size"s, get_frag_size_def},
+    {"max_chunk_size"s, get_max_chunk_size_def}};
+
+void get_dataframe_definitions(TableDescriptor& td,
+                               const std::unique_ptr<NameValueAssign>& p,
+                               const std::list<ColumnDescriptor>& columns) {
+  const auto it = tableDefFuncMap.find(boost::to_lower_copy<std::string>(*p->get_name()));
+  if (it == tableDefFuncMap.end()) {
+    throw std::runtime_error("Invalid CREATE DATAFRAME option " + *p->get_name() +
+                             ". Should be FRAGMENT_SIZE or MAX_CHUNK_SIZE.");
   }
   return it->second(td, p.get(), columns);
 }
@@ -2169,6 +2188,78 @@ void CreateTableStmt::execute(const Catalog_Namespace::SessionInfo& session) {
       session.get_currentUser(), td.tableName, TableDBObjectType, catalog);
 }
 
+void CreateDataframeStmt::execute(const Catalog_Namespace::SessionInfo& session) {
+  auto& catalog = session.getCatalog();
+
+  const auto execute_write_lock = mapd_unique_lock<mapd_shared_mutex>(
+      *legacylockmgr::LockMgr<mapd_shared_mutex, bool>::getMutex(
+          legacylockmgr::ExecutorOuterLock, true));
+
+  // check access privileges
+  if (!session.checkDBAccessPrivileges(DBObjectType::TableDBObjectType,
+                                       AccessPrivileges::CREATE_TABLE)) {
+    throw std::runtime_error("Table " + *table_ +
+                             " will not be created. User has no create privileges.");
+  }
+
+  if (catalog.getMetadataForTable(*table_) != nullptr) {
+    throw std::runtime_error("Table " + *table_ + " already exists.");
+  }
+  TableDescriptor td;
+  std::list<ColumnDescriptor> columns;
+  std::vector<SharedDictionaryDef> shared_dict_defs;
+
+  std::unordered_set<std::string> uc_col_names;
+  for (auto& e : table_element_list_) {
+    if (dynamic_cast<SharedDictionaryDef*>(e.get())) {
+      auto shared_dict_def = static_cast<SharedDictionaryDef*>(e.get());
+      validate_shared_dictionary(
+          this, shared_dict_def, columns, shared_dict_defs, catalog);
+      shared_dict_defs.push_back(*shared_dict_def);
+      continue;
+    }
+    if (!dynamic_cast<ColumnDef*>(e.get())) {
+      throw std::runtime_error("Table constraints are not supported yet.");
+    }
+    ColumnDef* coldef = static_cast<ColumnDef*>(e.get());
+    ColumnDescriptor cd;
+    cd.columnName = *coldef->get_column_name();
+    const auto uc_col_name = boost::to_upper_copy<std::string>(cd.columnName);
+    const auto it_ok = uc_col_names.insert(uc_col_name);
+    if (!it_ok.second) {
+      throw std::runtime_error("Column '" + cd.columnName + "' defined more than once");
+    }
+
+    setColumnDescriptor(cd, coldef);
+    columns.push_back(cd);
+  }
+
+  td.tableName = *table_;
+  td.nColumns = columns.size();
+  td.isView = false;
+  td.fragmenter = nullptr;
+  td.fragType = Fragmenter_Namespace::FragmenterType::INSERT_ORDER;
+  td.maxFragRows = DEFAULT_FRAGMENT_ROWS;
+  td.maxChunkSize = DEFAULT_MAX_CHUNK_SIZE;
+  td.fragPageSize = DEFAULT_PAGE_SIZE;
+  td.maxRows = DEFAULT_MAX_ROWS;
+  td.persistenceLevel = Data_Namespace::MemoryLevel::CPU_LEVEL;
+  if (!storage_options_.empty()) {
+    for (auto& p : storage_options_) {
+      get_dataframe_definitions(td, p, columns);
+    }
+  }
+  td.keyMetainfo = serialize_key_metainfo(nullptr, shared_dict_defs);
+  td.userId = session.get_currentUser().userId;
+  td.storageType = *filename_;
+
+  catalog.createShardedTable(td, columns, shared_dict_defs);
+  // TODO (max): It's transactionally unsafe, should be fixed: we may create object w/o
+  // privileges
+  SysCatalog::instance().createDBObject(
+      session.get_currentUser(), td.tableName, TableDBObjectType, catalog);
+}
+
 std::shared_ptr<ResultSet> getResultSet(QueryStateProxy query_state_proxy,
                                         const std::string select_stmt,
                                         std::vector<TargetMetaInfo>& targets,
@@ -2207,6 +2298,8 @@ std::shared_ptr<ResultSet> getResultSet(QueryStateProxy query_state_proxy,
                          false,
                          false,
                          0.9,
+                         false,
+                         1000,
                          ExecutorType::Native,
                          outer_fragment_indices};
   RelAlgExecutor ra_executor(executor.get(), catalog, query_ra);
@@ -2216,7 +2309,7 @@ std::shared_ptr<ResultSet> getResultSet(QueryStateProxy query_state_proxy,
                                                      nullptr,
                                                      nullptr),
                          {}};
-  result = ra_executor.executeRelAlgQuery(co, eo, nullptr);
+  result = ra_executor.executeRelAlgQuery(co, eo, false, nullptr);
   targets = result.getTargetsMeta();
 
   return result.getRows();
@@ -2342,11 +2435,16 @@ std::list<ColumnDescriptor> LocalConnector::getColumnDescriptors(AggregatedResul
 }
 
 void InsertIntoTableAsSelectStmt::populateData(QueryStateProxy query_state_proxy,
-                                               bool is_temporary,
                                                bool validate_table) {
   auto const session = query_state_proxy.getQueryState().getConstSessionInfo();
-  LocalConnector local_connector;
+  auto& catalog = session->getCatalog();
+  const auto td_with_lock =
+      lockmgr::TableSchemaLockContainer<lockmgr::ReadLock>::acquireTableDescriptor(
+          catalog, table_name_);
+  const auto td = td_with_lock();
+  foreign_storage::validate_non_foreign_table_write(td);
 
+  LocalConnector local_connector;
   bool populate_table = false;
 
   if (leafs_connector_) {
@@ -2358,7 +2456,6 @@ void InsertIntoTableAsSelectStmt::populateData(QueryStateProxy query_state_proxy
     }
   }
 
-  auto& catalog = session->getCatalog();
   auto get_target_column_descriptors = [this, &catalog](const TableDescriptor* td) {
     std::vector<const ColumnDescriptor*> target_column_descriptors;
     if (column_list_.empty()) {
@@ -2378,10 +2475,7 @@ void InsertIntoTableAsSelectStmt::populateData(QueryStateProxy query_state_proxy
     return target_column_descriptors;
   };
 
-  const auto td_with_lock =
-      lockmgr::TableSchemaLockContainer<lockmgr::ReadLock>::acquireTableDescriptor(
-          catalog, table_name_);
-  const auto td = td_with_lock();
+  bool is_temporary = table_is_temporary(td);
 
   // Don't allow simultaneous inserts
   const auto insert_data_lock =
@@ -2740,7 +2834,7 @@ void InsertIntoTableAsSelectStmt::execute(const Catalog_Namespace::SessionInfo& 
       &session_copy, boost::null_deleter());
   auto query_state = query_state::QueryState::create(session_ptr, select_query_);
   auto stdlog = STDLOG(query_state);
-  populateData(query_state->createQueryStateProxy(), false, true);
+  populateData(query_state->createQueryStateProxy(), true);
 }
 
 void CreateTableAsSelectStmt::execute(const Catalog_Namespace::SessionInfo& session) {
@@ -2816,7 +2910,7 @@ void CreateTableAsSelectStmt::execute(const Catalog_Namespace::SessionInfo& sess
   }
 
   try {
-    populateData(query_state->createQueryStateProxy(), is_temporary_, false);
+    populateData(query_state->createQueryStateProxy(), false);
   } catch (...) {
     if (!g_cluster) {
       const TableDescriptor* created_td = catalog.getMetadataForTable(table_name_);
@@ -2868,6 +2962,9 @@ void DropTableStmt::execute(const Catalog_Namespace::SessionInfo& session) {
   auto table_data_write_lock =
       lockmgr::TableDataLockMgr::getWriteLockForTable(catalog, *table);
   catalog.dropTable(td);
+
+  // invalidate cached hashtable
+  DeleteTriggeredCacheInvalidator::invalidateCaches();
 }
 
 void TruncateTableStmt::execute(const Catalog_Namespace::SessionInfo& session) {
@@ -2905,6 +3002,9 @@ void TruncateTableStmt::execute(const Catalog_Namespace::SessionInfo& session) {
   auto table_data_write_lock =
       lockmgr::TableDataLockMgr::getWriteLockForTable(catalog, *table);
   catalog.truncateTable(td);
+
+  // invalidate cached hashtable
+  DeleteTriggeredCacheInvalidator::invalidateCaches();
 }
 
 void check_alter_table_privilege(const Catalog_Namespace::SessionInfo& session,
@@ -3038,7 +3138,8 @@ void AddColumnStmt::execute(const Catalog_Namespace::SessionInfo& session) {
   check_executable(session, td);
 
   CHECK(td->fragmenter);
-  if (dynamic_cast<Fragmenter_Namespace::SortedOrderFragmenter*>(td->fragmenter)) {
+  if (std::dynamic_pointer_cast<Fragmenter_Namespace::SortedOrderFragmenter>(
+          td->fragmenter)) {
     throw std::runtime_error(
         "Adding columns to a table is not supported when using the \"sort_column\" "
         "option.");
@@ -3072,14 +3173,7 @@ void AddColumnStmt::execute(const Catalog_Namespace::SessionInfo& session) {
     }
 
     std::unique_ptr<Importer_NS::Loader> loader(new Importer_NS::Loader(catalog, td));
-    std::vector<std::unique_ptr<Importer_NS::TypedImportBuffer>> import_buffers;
-
-    // a call of Catalog_Namespace::MapDHandler::prepare_columnar_loader
-    session.get_mapdHandler()->prepare_columnar_loader(session.get_session_id(),
-                                                       td->tableName,
-                                                       td->nColumns - 1,
-                                                       &loader,
-                                                       &import_buffers);
+    auto import_buffers = Importer_NS::setup_column_loaders(td, loader.get());
     loader->setReplicating(true);
 
     // set_geo_physical_import_buffer below needs a sorted import_buffers
@@ -3250,6 +3344,9 @@ void DropColumnStmt::execute(const Catalog_Namespace::SessionInfo& session) {
     catalog.getSqliteConnector().query("ROLLBACK TRANSACTION");
     throw;
   }
+
+  // invalidate cached hashtable
+  DeleteTriggeredCacheInvalidator::invalidateCaches();
 }
 
 void RenameColumnStmt::execute(const Catalog_Namespace::SessionInfo& session) {
@@ -3300,7 +3397,7 @@ void CopyTableStmt::execute(const Catalog_Namespace::SessionInfo& session,
 
   const TableDescriptor* td{nullptr};
   std::unique_ptr<lockmgr::TableSchemaLockContainer<lockmgr::ReadLock>> td_with_lock;
-  lockmgr::WriteLock insert_data_lock;
+  std::unique_ptr<lockmgr::WriteLock> insert_data_lock;
 
   auto& catalog = session.getCatalog();
 
@@ -3309,7 +3406,8 @@ void CopyTableStmt::execute(const Catalog_Namespace::SessionInfo& session,
         lockmgr::TableSchemaLockContainer<lockmgr::ReadLock>::acquireTableDescriptor(
             catalog, *table));
     td = (*td_with_lock)();
-    insert_data_lock = lockmgr::InsertDataLockMgr::getWriteLockForTable(catalog, *table);
+    insert_data_lock = std::make_unique<lockmgr::WriteLock>(
+        lockmgr::InsertDataLockMgr::getWriteLockForTable(catalog, *table));
   } catch (const std::runtime_error& e) {
     // noop
     // TODO(adb): We're really only interested in whether the table exists or not.
@@ -3635,6 +3733,7 @@ void CopyTableStmt::execute(const Catalog_Namespace::SessionInfo& session,
                       "processing ";
         // if we have crossed the truncated load threshold
         load_truncated = true;
+        success = false;
       }
       if (!load_truncated) {
         tr = std::string("Loaded: " + std::to_string(rows_completed) +
@@ -3700,7 +3799,7 @@ std::string extractObjectNameFromHierName(const std::string& objectHierName,
     }
   } else {
     if (objectType.compare("TABLE") == 0 || objectType.compare("DASHBOARD") == 0 ||
-        objectType.compare("VIEW") == 0) {
+        objectType.compare("VIEW") == 0 || objectType.compare("SERVER") == 0) {
       switch (componentNames.size()) {
         case (1): {
           objectName = componentNames[0];
@@ -3734,6 +3833,8 @@ static std::pair<AccessPrivileges, DBObjectType> parseStringPrivs(
           {{"ALL"s, DashboardDBObjectType},
            {AccessPrivileges::ALL_DASHBOARD, DashboardDBObjectType}},
           {{"ALL"s, ViewDBObjectType}, {AccessPrivileges::ALL_VIEW, ViewDBObjectType}},
+          {{"ALL"s, ServerDBObjectType},
+           {AccessPrivileges::ALL_SERVER, ServerDBObjectType}},
 
           {{"CREATE TABLE"s, DatabaseDBObjectType},
            {AccessPrivileges::CREATE_TABLE, TableDBObjectType}},
@@ -3794,6 +3895,13 @@ static std::pair<AccessPrivileges, DBObjectType> parseStringPrivs(
           {{"DELETE"s, DashboardDBObjectType},
            {AccessPrivileges::DELETE_DASHBOARD, DashboardDBObjectType}},
 
+          {{"CREATE SERVER"s, DatabaseDBObjectType},
+           {AccessPrivileges::CREATE_SERVER, ServerDBObjectType}},
+          {{"DROP SERVER"s, DatabaseDBObjectType},
+           {AccessPrivileges::DROP_SERVER, ServerDBObjectType}},
+          {{"DROP"s, ServerDBObjectType},
+           {AccessPrivileges::DROP_SERVER, ServerDBObjectType}},
+
           {{"VIEW SQL EDITOR"s, DatabaseDBObjectType},
            {AccessPrivileges::VIEW_SQL_EDITOR, DatabaseDBObjectType}},
           {{"ACCESS"s, DatabaseDBObjectType},
@@ -3832,6 +3940,9 @@ void GrantPrivilegesStmt::execute(const Catalog_Namespace::SessionInfo& session)
   const auto objectName =
       extractObjectNameFromHierName(get_object(), parserObjectType, catalog);
   auto objectType = DBObjectTypeFromString(parserObjectType);
+  if (objectType == ServerDBObjectType && !g_enable_fsi) {
+    throw std::runtime_error("GRANT failed. SERVER object unrecognized.");
+  }
   DBObject dbObject = createObject(objectName, objectType);
   /* verify object ownership if not suser */
   if (!currentUser.isSuper) {
@@ -3848,6 +3959,9 @@ void GrantPrivilegesStmt::execute(const Catalog_Namespace::SessionInfo& session)
         boost::to_upper_copy<std::string>(get_privs()[i]), objectType, get_object());
     objects[i].setPrivileges(priv.first);
     objects[i].setPermissionType(priv.second);
+    if (priv.second == ServerDBObjectType && !g_enable_fsi) {
+      throw std::runtime_error("GRANT failed. SERVER object unrecognized.");
+    }
   }
   SysCatalog::instance().grantDBObjectPrivilegesBatch(grantees, objects, catalog);
 }
@@ -3860,6 +3974,9 @@ void RevokePrivilegesStmt::execute(const Catalog_Namespace::SessionInfo& session
   const auto objectName =
       extractObjectNameFromHierName(get_object(), parserObjectType, catalog);
   auto objectType = DBObjectTypeFromString(parserObjectType);
+  if (objectType == ServerDBObjectType && !g_enable_fsi) {
+    throw std::runtime_error("REVOKE failed. SERVER object unrecognized.");
+  }
   DBObject dbObject = createObject(objectName, objectType);
   /* verify object ownership if not suser */
   if (!currentUser.isSuper) {
@@ -3876,6 +3993,9 @@ void RevokePrivilegesStmt::execute(const Catalog_Namespace::SessionInfo& session
         boost::to_upper_copy<std::string>(get_privs()[i]), objectType, get_object());
     objects[i].setPrivileges(priv.first);
     objects[i].setPermissionType(priv.second);
+    if (priv.second == ServerDBObjectType && !g_enable_fsi) {
+      throw std::runtime_error("REVOKE failed. SERVER object unrecognized.");
+    }
   }
   SysCatalog::instance().revokeDBObjectPrivilegesBatch(grantees, objects, catalog);
 }
@@ -4005,7 +4125,35 @@ void RevokeRoleStmt::execute(const Catalog_Namespace::SessionInfo& session) {
   SysCatalog::instance().revokeRoleBatch(get_roles(), get_grantees());
 }
 
-using dbl = std::numeric_limits<double>;
+void ShowCreateTableStmt::execute(const Catalog_Namespace::SessionInfo& session) {
+  using namespace Catalog_Namespace;
+
+  const auto execute_read_lock = mapd_shared_lock<mapd_shared_mutex>(
+      *legacylockmgr::LockMgr<mapd_shared_mutex, bool>::getMutex(
+          legacylockmgr::ExecutorOuterLock, true));
+
+  auto& catalog = session.getCatalog();
+  const TableDescriptor* td = catalog.getMetadataForTable(*table_);
+  if (!td) {
+    throw std::runtime_error("Table/View " + *table_ + " does not exist.");
+  }
+
+  DBObject dbObject(td->tableName, td->isView ? ViewDBObjectType : TableDBObjectType);
+  dbObject.loadKey(catalog);
+  std::vector<DBObject> privObjects = {dbObject};
+
+  if (!SysCatalog::instance().hasAnyPrivileges(session.get_currentUser(), privObjects)) {
+    throw std::runtime_error("Table/View " + *table_ + " does not exist.");
+  }
+  if (td->isView && !session.get_currentUser().isSuper) {
+    // TODO: we need to run a validate query to ensure the user has access to the
+    // underlying table, but we do not have any of the machinery in here. Disable for now,
+    // unless the current user is a super user.
+    throw std::runtime_error("SHOW CREATE TABLE not yet supported for views");
+  }
+
+  create_stmt_ = catalog.dumpCreateTable(td);
+}
 
 void ExportQueryStmt::execute(const Catalog_Namespace::SessionInfo& session) {
   auto session_copy = session;
@@ -4580,18 +4728,3 @@ void RestoreTableStmt::execute(const Catalog_Namespace::SessionInfo& session) {
 }
 
 }  // namespace Parser
-
-// this is a non-clustered version of MapDHandler::prepare_columnar_loader,
-// exists for non-thrift builds, specifically for test cases and bin/initdb.
-void Catalog_Namespace::MapDHandler::prepare_columnar_loader(
-    const std::string& session,
-    const std::string& table_name,
-    size_t num_cols,
-    std::unique_ptr<Importer_NS::Loader>* loader,
-    std::vector<std::unique_ptr<Importer_NS::TypedImportBuffer>>* import_buffers) {
-  auto col_descs = (*loader)->get_column_descs();
-  for (auto cd : col_descs) {
-    import_buffers->push_back(std::unique_ptr<Importer_NS::TypedImportBuffer>(
-        new Importer_NS::TypedImportBuffer(cd, (*loader)->getStringDict(cd))));
-  }
-}

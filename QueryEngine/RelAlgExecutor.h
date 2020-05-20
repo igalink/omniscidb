@@ -17,16 +17,16 @@
 #ifndef QUERYENGINE_RELALGEXECUTOR_H
 #define QUERYENGINE_RELALGEXECUTOR_H
 
-#include "../Shared/scope.h"
-#include "Descriptors/RelAlgExecutionDescriptor.h"
 #include "Distributed/AggregatedResult.h"
-#include "Execute.h"
-#include "InputMetadata.h"
-#include "JoinFilterPushDown.h"
+#include "QueryEngine/Descriptors/RelAlgExecutionDescriptor.h"
+#include "QueryEngine/Execute.h"
+#include "QueryEngine/InputMetadata.h"
+#include "QueryEngine/JoinFilterPushDown.h"
+#include "QueryEngine/QueryRewrite.h"
 #include "QueryEngine/RelAlgDagBuilder.h"
-#include "QueryRewrite.h"
-#include "SpeculativeTopN.h"
-#include "StreamingTopN.h"
+#include "QueryEngine/SpeculativeTopN.h"
+#include "QueryEngine/StreamingTopN.h"
+#include "Shared/scope.h"
 #include "ThriftHandler/QueryState.h"
 
 #include <ctime>
@@ -93,6 +93,7 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
 
   ExecutionResult executeRelAlgQuery(const CompilationOptions& co,
                                      const ExecutionOptions& eo,
+                                     const bool just_explain_plan,
                                      RenderInfo* render_info);
 
   ExecutionResult executeRelAlgQueryWithFilterPushDown(const RaExecutionSequence& seq,
@@ -155,6 +156,7 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
  private:
   ExecutionResult executeRelAlgQueryNoRetry(const CompilationOptions& co,
                                             const ExecutionOptions& eo,
+                                            const bool just_explain_plan,
                                             RenderInfo* render_info);
 
   void executeRelAlgStep(const RaExecutionSequence& seq,
@@ -212,7 +214,8 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
       const RelAlgExecutionUnit& ra_exe_unit,
       const std::vector<InputTableInfo>& query_infos,
       const CompilationOptions& co,
-      ColumnCacheMap& column_cache_map);
+      ColumnCacheMap& column_cache_map,
+      std::shared_ptr<RowSetMemoryOwner> row_set_mem_owner);
 
   ExecutionResult executeFilter(const RelFilter*,
                                 const CompilationOptions&,
@@ -229,6 +232,13 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
   ExecutionResult executeLogicalValues(const RelLogicalValues*, const ExecutionOptions&);
 
   ExecutionResult executeModify(const RelModify* modify, const ExecutionOptions& eo);
+
+  ExecutionResult executeUnion(const RelLogicalUnion*,
+                               const RaExecutionSequence&,
+                               const CompilationOptions&,
+                               const ExecutionOptions&,
+                               RenderInfo*,
+                               const int64_t queue_time_ms);
 
   // TODO(alex): just move max_groups_buffer_entry_guess to RelAlgExecutionUnit once
   //             we deprecate the plan-based executor paths and remove WorkUnit
@@ -311,6 +321,10 @@ class RelAlgExecutor : private StorageIOFacility<RelAlgExecutorTraits> {
                                 const bool just_explain);
 
   WorkUnit createJoinWorkUnit(const RelJoin*, const SortInfo&, const bool just_explain);
+
+  WorkUnit createUnionWorkUnit(const RelLogicalUnion*,
+                               const SortInfo&,
+                               const ExecutionOptions& eo);
 
   TableFunctionWorkUnit createTableFunctionWorkUnit(const RelTableFunction* table_func,
                                                     const bool just_explain);
