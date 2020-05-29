@@ -27,9 +27,6 @@
 #include "Shared/Logger.h"
 #include "Shared/mapdpath.h"
 #include "Shared/sqltypes.h"
-#include <thread>
-#include <chrono>
-
 
 
 namespace EmbeddedDatabase {
@@ -108,9 +105,8 @@ inline ColumnEncoding sqlToColumnEncoding(const EncodingType& type) {
   }
   return ColumnEncoding::NONE;
 }
-//enum class ColumnType : uint32_t { Unknown, Integer, Double, Float, String, Array };
 
- ColumnDetails::ColumnDetails()
+ColumnDetails::ColumnDetails()
   : col_type(ColumnType::UNKNOWN)
   , encoding(ColumnEncoding::NONE)
   , nullable(false)
@@ -118,9 +114,9 @@ inline ColumnEncoding sqlToColumnEncoding(const EncodingType& type) {
   , precision(0)
   , scale(0)
   , comp_param(0)
-  {}
+{}
 
- ColumnDetails::ColumnDetails(const std::string& _col_name,
+ColumnDetails::ColumnDetails(const std::string& _col_name,
                 ColumnType _col_type,
                 ColumnEncoding _encoding,
                 bool _nullable,
@@ -136,7 +132,7 @@ inline ColumnEncoding sqlToColumnEncoding(const EncodingType& type) {
   , precision(_precision)
   , scale(_scale)
   , comp_param(_comp_param)
-  {}
+{}
 
 /**
  * Cursor internal implementation
@@ -203,20 +199,6 @@ class CursorImpl : public Cursor {
                     col_names_,
                     row_count);
                 record_batch_ =  converter->convertToArrow();
-        auto rows = record_batch_->num_rows();
-        auto cols = record_batch_->num_columns();
-        std::cout << "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ CURSOR: rows=" << rows << ", cols=" << cols << std::endl;
-        for(int i = 0; i < cols; ++i) {
-            //arrow::DoubleArray* 
-            auto* col = record_batch_->column(i).get();
-            auto dbl = std::static_pointer_cast<arrow::DoubleArray>(record_batch_->column(i));
-            //for (auto& x : *col)
-
-//            for (int j=0; j < dbl->length(); ++j)
-//                std::cout << dbl->Value(j) << "\t";
-            std::cout << std::endl << "col-" << i << " length = " << dbl->length() << std::endl;
-        }
-        std::cout << "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ CURSOR: rows=" << rows << ", cols=" << cols << std::endl;
                 return record_batch_;
             }
         }
@@ -244,16 +226,13 @@ class DBEngineImpl : public DBEngine {
 
   void reset() {
     // TODO: Destroy all cursors in the cursors_
-    std::cout << "DBE RESET !!!!!!!!!!!!!!!!!!!!" << std::endl;
     if (query_runner_ != nullptr) {
       query_runner_->reset();
     }
   }
 
   void executeDDL(const std::string& query) {
-    std::cout << "DBE:CPP:executeDDL: " << query << std::endl;
     if (query_runner_ != nullptr) {
-
       try {
         query_runner_->runDDLStatement(query);
       } catch(std::exception const& e) {
@@ -264,30 +243,8 @@ class DBEngineImpl : public DBEngine {
       std::cout << "DBE:CPP:executeDDL: query_runner is NULL" << std::endl;
     }
   }
-/*
-  Cursor* executeDML(const std::string& query) {
-    std::cout << "DBE:CPP:executeDML: " << query << std::endl;
-    if (query_runner_ != nullptr) {
-      try {
-        auto rs = query_runner_->runSQL(query, ExecutorDeviceType::CPU);
-        cursors_.emplace_back(new CursorImpl(rs, data_mgr_));
-        return cursors_.back();
-      } catch(std::exception const& e) {
-        std::cout << "DBE:CPP:executeDML:Exception: " << e.what() << std::endl;
-      }
-      std::cout << "DBE:CPP:executeDML: OK" << std::endl;
-    } else {
-      std::cout << "DBE:CPP:executeDML: query_runner is NULL" << std::endl;
-    }
-    return nullptr;
-  }
-*/
 
   Cursor* executeDML(const std::string& query) {
-    std::cout << "g_enable_columnar_output = " << g_enable_columnar_output << std::endl;
-    g_enable_columnar_output = true;
-    //g_enable_debug_timer = true;
-    std::cout << "DBE:CPP:executeDML: " << query << std::endl;
     if (query_runner_ != nullptr) {
       try {
         const auto execution_result =
@@ -298,19 +255,7 @@ class DBEngineImpl : public DBEngine {
           col_names.push_back(target.get_resname());
         }
         auto rs = execution_result.getRows();
-//        auto rs = query_runner_->runSQL(query, ExecutorDeviceType::CPU);
-
-        CursorImpl* cursor = new CursorImpl(rs, col_names, data_mgr_);
-        //auto rows = cursor->getRowCount();
-        //auto cols = cursor->getColCount();
-        //std::cout << "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$ CURSOR: rows=" << rows << ", cols=" << cols << std::endl;
-        //for(int i = 0; i < rows; ++i) {
-        //    auto row = cursor->getNextRow();
-        //    for(int j = 0; j < cols; ++j)
-        //        std::cout << row.getDouble(j) << "\t";
-        //    std::cout << std::endl;
-        //}
-        cursors_.emplace_back(cursor); //new CursorImpl(rs, col_names, data_mgr_));
+        cursors_.emplace_back(new CursorImpl(rs, col_names, data_mgr_));
         return cursors_.back();
       } catch(std::exception const& e) {
         std::cout << "DBE:CPP:executeDML:Exception: " << e.what() << std::endl;
@@ -324,27 +269,22 @@ class DBEngineImpl : public DBEngine {
 
 
   std::vector<std::string> getTables() {
-    std::cout << "DBE:CPP:getTables" << std::endl;
     std::vector<std::string> table_names;
     if (query_runner_) {
       auto catalog = query_runner_->getCatalog();
       if (catalog) {
         try {
-//  auto const session_ptr = stdlog.getConstSessionInfo();
-//  auto const& cat = session_ptr->getCatalog();
           const auto tables = catalog->getAllTableMetadata();
           for (const auto td : tables) {
             if (td->shard >= 0) {
               // skip shards, they're not standalone tables
               continue;
             }
-            std::cout << "DBE:CPP:getTables: " << td->tableName << std::endl;
             table_names.push_back(td->tableName);
           }
         } catch(std::exception const& e) {
           std::cout << "DBE:CPP:getTables:Exception: " << e.what() << std::endl;
         }
-        std::cout << "DBE:CPP:getTables: OK" << std::endl;
       } else {
         std::cout << "DBE:CPP:executeDML: catalog is NULL" << std::endl;
       }
@@ -356,21 +296,17 @@ class DBEngineImpl : public DBEngine {
 
   DBEngineImpl(const std::string& base_path, int calcite_port)
       : base_path_(base_path), query_runner_(nullptr) {
-    std::cout << "DBE:CPP:DBEngine: " << base_path << ". port = " << calcite_port << std::endl;
     if (!boost::filesystem::exists(base_path_)) {
       std::cerr << "Catalog basepath " + base_path_ + " does not exist.\n";
       // TODO: Create database if it does not exist
     } else {
       SystemParameters mapd_parms;
       std::string data_path = base_path_ + OMNISCI_DATA_PATH;
-        std::cout << "data_path =" << data_path << std::endl;
       data_mgr_ =
           std::make_shared<Data_Namespace::DataMgr>(data_path, mapd_parms, false, 0);
       auto calcite = std::make_shared<Calcite>(-1, calcite_port, base_path_, 1024, 5000);
-      //std::this_thread::sleep_for(5s);
       auto& sys_cat = Catalog_Namespace::SysCatalog::instance();
       sys_cat.init(base_path_, data_mgr_, {}, calcite, false, false, {});
-      //std::this_thread::sleep_for(5s);
       if (!sys_cat.getSqliteConnector()) {
         std::cerr << "SqliteConnector is null " << std::endl;
       } else {
@@ -385,13 +321,11 @@ class DBEngineImpl : public DBEngine {
         auto session = std::make_unique<Catalog_Namespace::SessionInfo>(
             catalog, user_, ExecutorDeviceType::CPU, "");
         query_runner_ = QueryRunner::QueryRunner::init(session);
-        std::cout << "DBE:CPP:DBEngine: OK" << std::endl;
       }
     }
   }
 
   std::vector<ColumnDetails> getTableDetails(const std::string& table_name) {
-    std::cout << "DBE:CPP:getTableDetails: " << table_name << std::endl;
     std::vector<ColumnDetails> result;
     if (query_runner_) {
       auto catalog = query_runner_->getCatalog();
@@ -438,7 +372,6 @@ class DBEngineImpl : public DBEngine {
             }
             result.push_back(col_details);
           }
-          std::cout << "DBE:CPP:getTableDetails: OK" << std::endl;
         }
       }
     }
@@ -454,7 +387,6 @@ class DBEngineImpl : public DBEngine {
   std::vector<CursorImpl*> cursors_;
 };
 
-/********************************************* DBEngine external methods*/
 
 /**
  * Creates DBEngine instance
@@ -466,13 +398,16 @@ DBEngine* DBEngine::create(std::string path, int calcite_port) {
 }
 
 /** DBEngine downcasting methods */
+
 inline DBEngineImpl* getImpl(DBEngine* ptr) {
   return (DBEngineImpl*)ptr;
 }
+
 inline const DBEngineImpl* getImpl(const DBEngine* ptr) {
   return (const DBEngineImpl*)ptr;
 }
 
+/** DBEngine external methods */
 void DBEngine::reset() {
   // TODO: Make sure that dbengine does not released twice
   DBEngineImpl* engine = getImpl(this);
@@ -494,7 +429,7 @@ std::vector<ColumnDetails> DBEngine::getTableDetails(const std::string& table_na
   return engine->getTableDetails(table_name);
 }
 
-/********************************************* Row methods */
+/** Row methods */
 
 Row::Row() {}
 
@@ -533,15 +468,17 @@ std::string Row::getStr(size_t col_num) {
   return "Out of range";
 }
 
-/********************************************* Cursor external methods*/
-
 /** Cursor downcasting methods */
+
 inline CursorImpl* getImpl(Cursor* ptr) {
   return (CursorImpl*)ptr;
 }
+
 inline const CursorImpl* getImpl(const Cursor* ptr) {
   return (const CursorImpl*)ptr;
 }
+
+/** Cursor external methods */
 
 size_t Cursor::getColCount() {
   CursorImpl* cursor = getImpl(this);

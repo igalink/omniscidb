@@ -7,7 +7,7 @@ import pyarrow as pa
 
 
 ext_modules = [Extension("dbe",
-                     ["dbe.pyx"],
+                     ["${CMAKE_CURRENT_SOURCE_DIR}/dbe.pyx"],
                      language='c++',
                      )]
 
@@ -19,13 +19,9 @@ for ext in ext_modules:
     ext.libraries.extend(pa.get_libraries())
     ext.library_dirs.extend(pa.get_library_dirs())
 
-    ext.include_dirs.append('../')
-    ext.include_dirs.append('/usr/local/mapd-deps/include')
+    ext.include_dirs.append("${CMAKE_SOURCE_DIR}")
     ext.libraries.append('DBEngine')
-    ext.library_dirs.append('./')
-    ext.library_dirs.append('/usr/local/mapd-deps/lib')
-    ext.library_dirs.append('/lib/x86_64-linux-gnu')
-    ext.library_dirs.append('/usr/lib/x86_64-linux-gnu')
+    ext.library_dirs.append("${CMAKE_CURRENT_BINARY_DIR}")
 
     ext.extra_compile_args.append('-std=c++17')
 
