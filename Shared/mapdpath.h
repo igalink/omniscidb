@@ -79,8 +79,7 @@ inline std::string mapd_root_abs_path() {
 #ifdef XCODE
   const auto mapd_root = abs_exe_dir.parent_path().parent_path();
 #else
-  const auto mapd_root = is_dbe ? abs_exe_dir.parent_path().parent_path()
-                                : abs_exe_dir.parent_path();
+  const auto mapd_root = abs_exe_dir.parent_path();
 #endif
   return mapd_root.string();
 }
