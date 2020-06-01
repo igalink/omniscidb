@@ -44,6 +44,7 @@ inline std::string mapd_root_abs_path() {
   if (rc) {
     //check that DBEngine loaded
     if (strstr(dl_info.dli_fname, "libDBEngine") != NULL) {
+
       //dl_info.dli_fname not always contain full path
       if (strrchr(dl_info.dli_fname, '/') != NULL) {
         strcpy(abs_exe_path, dl_info.dli_fname);

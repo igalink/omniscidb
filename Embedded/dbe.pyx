@@ -88,7 +88,6 @@ cdef class PyColumnDetails:
     def __cinit__(self, string col_name, int col_type, int col_enc, bool nullable, bool is_array, int precision, int scale, int comp_param):
         self.c_col = _ColumnDetails(col_name, <_ColumnType>col_type, <_ColumnEncoding>col_enc, nullable, is_array, precision, scale, comp_param)
 
-
 cdef class PyRow:
     cdef _Row c_row  #Hold a C++ instance which we're wrapping
 
@@ -157,7 +156,6 @@ ColumnDetailsTp = namedtuple("ColumnDetails", ["name", "type", "nullable",
                                              "is_array"])
 cdef class PyDbEngine:
     cdef DBEngine* c_dbe  #Hold a C++ instance which we're wrapping
-
     def __cinit__(self, path, port):
         try:
             bpath = bytes(path, 'utf-8')
@@ -196,10 +194,6 @@ cdef class PyDbEngine:
         obj.c_cursor = self.c_dbe.executeDML(bytes(query, 'utf-8'));
         prb = obj.getArrowRecordBatch()
         df = prb.to_pandas()
-
-#    def get_tables(self):
-#        cdef vector[string] table_names = self.c_dbe.getTables()
-#        return table_names
 
     def get_table_details(self, table_name):
         cdef vector[ColumnDetails] table_details = self.c_dbe.getTableDetails(bytes(table_name, 'utf-8'))

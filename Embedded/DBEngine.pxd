@@ -72,6 +72,7 @@ cdef extern from "DBETypes.h" namespace 'EmbeddedDatabase':
         double getDouble(size_t col)
         string getStr(size_t col)
 
+
 cdef extern from "DBEngine.h" namespace 'EmbeddedDatabase':
     cdef cppclass Cursor:
         size_t getColCount()
