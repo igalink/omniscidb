@@ -1,9 +1,8 @@
-add_library(DBEngine SHARED DBEngine.cpp)
+add_library(DBEngine SHARED DBETypes.cpp DBEngine.cpp)
 
 target_link_libraries(DBEngine QueryRunner QueryEngine DataMgr ${Arrow_LIBRARIES} ${TBB_LIBS})
 
-set(INSTALL_PATH "${CMAKE_INSTALL_PREFIX}/bin/Embedded")
-install(TARGETS DBEngine DESTINATION ${INSTALL_PATH})
+install(TARGETS DBEngine DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
 
 find_program(PYTHON "python3")
 IF(PYTHON)
@@ -33,6 +32,5 @@ IF(PYTHON)
                 --install-option --install-scripts=${INSTALL_PATH} \
                 --install-option --install-data=${INSTALL_PATH} \
                 --install-option --install-purelib=${INSTALL_PATH})")
-
 ENDIF(PYTHON)
 

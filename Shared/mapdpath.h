@@ -29,7 +29,6 @@
 #include <dlfcn.h>
 
 inline std::string mapd_root_abs_path() {
-  bool is_dbe(false);
 #ifdef __APPLE__
   char abs_exe_path[PROC_PIDPATHINFO_MAXSIZE] = {0};
   auto path_len = proc_pidpath(getpid(), abs_exe_path, sizeof(abs_exe_path));
@@ -45,7 +44,7 @@ inline std::string mapd_root_abs_path() {
   if (rc) {
     //check that DBEngine loaded
     if (strstr(dl_info.dli_fname, "libDBEngine") != NULL) {
-      is_dbe = true;
+
       //dl_info.dli_fname not always contain full path
       if (strrchr(dl_info.dli_fname, '/') != NULL) {
         strcpy(abs_exe_path, dl_info.dli_fname);

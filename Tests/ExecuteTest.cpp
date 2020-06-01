@@ -4374,6 +4374,27 @@ TEST(Select, Time) {
                   "select dy from (SELECT DATEDIFF('day', o, DATE '1999-09-10') as dy, o "
                   "from test order by x) limit 1;",
                   dt)));
+
+    // range tests
+    ASSERT_EQ(
+        1417392000,
+        v<int64_t>(run_simple_agg("SELECT date_trunc(month, m) as key0 FROM "
+                                  "test WHERE (m >= TIMESTAMP(3) '1970-01-01 "
+                                  "00:00:00.000') GROUP BY key0 ORDER BY key0 LIMIT 1;",
+                                  dt)));
+  }
+}
+
+TEST(Select, TimeRedux) {
+  // The time tests need a general cleanup. Collect tests found from specific bugs here so
+  // we don't accidentally remove them
+  for (auto dt : {ExecutorDeviceType::CPU, ExecutorDeviceType::GPU}) {
+    SKIP_NO_GPU();
+    ASSERT_EQ(
+        15,
+        v<int64_t>(run_simple_agg(
+            R"(SELECT COUNT(*) FROM test WHERE o = (DATE '1999-09-01') OR CAST(o AS TIMESTAMP) = (TIMESTAMP '1999-09-09 00:00:00.000');)",
+            dt)));
   }
 }
 
